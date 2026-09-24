@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Public-safe case record; keep private binding elsewhere",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^case-[A-Za-z0-9-]+$"
+    },
+    "status": {
+      "enum": [
+        "PREPARED",
+        "WAIT_CAPABILITY",
+        "WAIT_ENVIRONMENT",
+        "WAIT_HUMAN",
+        "PRO_PENDING",
+        "PRO_READY",
+        "FABLE_PENDING",
+        "PRO_REVIEW_PENDING",
+        "PAUSED",
+        "CONVERGED",
+        "LOCAL_RECONCILIATION",
+        "IMPLEMENTING",
+        "VERIFIED",
+        "CLOSED",
+        "CANCELLED"
+      ]
+    },
+    "branch": {
+      "type": "string",
+      "pattern": "^case/case-[A-Za-z0-9-]+$"
+    },
+    "requirements_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bundle_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "solution_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rounds_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "next_actor": {
+      "enum": [
+        "coordinator",
+        "pro",
+        "fable",
+        "owner"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "case_id",
+    "status",
+    "branch",
+    "requirements_digest",
+    "bundle_digest",
+    "solution_digest",
+    "rounds_total",
+    "next_actor"
+  ],
+  "additionalProperties": false
+}

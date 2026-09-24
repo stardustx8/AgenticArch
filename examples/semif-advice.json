@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "request_id": "synthetic-1",
+  "state_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "ordered_options": [
+    "luna_low",
+    "luna_high",
+    "astra_high",
+    "pro_web"
+  ],
+  "scores": {
+    "luna_low": 0.1,
+    "luna_high": 0.6,
+    "astra_high": 0.2,
+    "pro_web": 0.1
+  },
+  "selected": "luna_high",
+  "calibration": "uncalibrated",
+  "provenance": {
+    "model_revision": "synthetic",
+    "tokenizer_revision": "synthetic",
+    "backend": "fixture",
+    "prompt_version": "intake-v1",
+    "calibration_artifact_digest": null
+  }
+}

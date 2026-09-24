@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Convergence inputs; schema validation is not proof of participation",
+  "type": "object",
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "solution_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "requirements_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bundle_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Normalized role verdict",
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "pro",
+              "fable"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "APPROVE",
+              "REVISE",
+              "BLOCKED"
+            ]
+          },
+          "solution_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "requirements_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bundle_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "role",
+          "verdict",
+          "solution_digest",
+          "requirements_digest",
+          "bundle_digest",
+          "receipt_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "receipts": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Coordinator-verified transport receipt",
+        "type": "object",
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "pro",
+              "fable"
+            ]
+          },
+          "phase": {
+            "enum": [
+              "initial",
+              "fable_challenge",
+              "pro_response",
+              "review"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "identity_verified": {
+            "type": "boolean"
+          },
+          "durable_output_verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "case_id",
+          "role",
+          "phase",
+          "sequence",
+          "identity_verified",
+          "durable_output_verified"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "unresolved_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "manifest_verified": {
+      "type": "boolean"
+    },
+    "evidence_references_verified": {
+      "type": "boolean"
+    },
+    "required_deliverables_present": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "case_id",
+    "solution_digest",
+    "requirements_digest",
+    "bundle_digest",
+    "reviews",
+    "receipts",
+    "unresolved_blockers",
+    "manifest_verified",
+    "evidence_references_verified",
+    "required_deliverables_present"
+  ],
+  "additionalProperties": false
+}

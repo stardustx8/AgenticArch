@@ -1,0 +1,333 @@
+{
+  "schema_version": 1,
+  "operators": [
+    {
+      "id": "context_relevance",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "context_ready"
+      ],
+      "projection": [
+        "goal",
+        "candidate",
+        "requirements"
+      ],
+      "question": "How does this candidate bear on the current task, considering its stated source/version?",
+      "options": [
+        {
+          "id": "relevant",
+          "description": "Directly useful evidence for the task."
+        },
+        {
+          "id": "possibly_stale",
+          "description": "Possibly relevant but its applicability needs revalidation."
+        },
+        {
+          "id": "unrelated",
+          "description": "No material task relevance is shown."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "rank_context"
+    },
+    {
+      "id": "requirement_evidence",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "implementation_pass",
+        "case_return"
+      ],
+      "projection": [
+        "requirement",
+        "evidence"
+      ],
+      "question": "Does the supplied evidence address this one requirement? Do not treat a claimed pass as observed evidence.",
+      "options": [
+        {
+          "id": "supported",
+          "description": "The evidence supports the stated requirement within its explicit scope."
+        },
+        {
+          "id": "contradicted",
+          "description": "The evidence conflicts with the requirement."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_gap_review"
+    },
+    {
+      "id": "evidence_gap",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "context_ready"
+      ],
+      "projection": [
+        "goal",
+        "requirements",
+        "evidence_index"
+      ],
+      "question": "Which one evidence category most needs inspection before proceeding?",
+      "options": [
+        {
+          "id": "interface_contract",
+          "description": "The relevant interface/behavior contract needs inspection."
+        },
+        {
+          "id": "local_environment",
+          "description": "Local version or runtime facts need inspection."
+        },
+        {
+          "id": "failure_reproduction",
+          "description": "A concrete failure reproduction is missing."
+        },
+        {
+          "id": "prior_decision",
+          "description": "An applicable earlier owner/design decision needs inspection."
+        },
+        {
+          "id": "no_obvious_gap",
+          "description": "No obvious gap appears in the supplied index; this does not prove completeness."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_retrieval"
+    },
+    {
+      "id": "next_diagnostic",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "verification_failed"
+      ],
+      "projection": [
+        "goal",
+        "failure",
+        "diagnostic_menu"
+      ],
+      "question": "Which existing diagnostic category is most useful next? Select only a category present in diagnostic_menu; otherwise choose insufficient.",
+      "options": [
+        {
+          "id": "inspect_contract",
+          "description": "Inspect the relevant behavior/interface contract."
+        },
+        {
+          "id": "reproduce_failure",
+          "description": "Run a scoped reproduction already available in the menu."
+        },
+        {
+          "id": "inspect_environment",
+          "description": "Inspect relevant versions/configuration using an approved read-only capability."
+        },
+        {
+          "id": "inspect_recent_change",
+          "description": "Inspect the scoped recent diff and related tests."
+        },
+        {
+          "id": "review_hypotheses",
+          "description": "Return unresolved hypotheses to the coding coordinator."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_diagnostic"
+    },
+    {
+      "id": "objection_relation",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "review_turn"
+      ],
+      "projection": [
+        "new_finding",
+        "existing_finding",
+        "evidence"
+      ],
+      "question": "How is the new finding related to the existing finding? Preserve differences in risk and evidence.",
+      "options": [
+        {
+          "id": "same_issue",
+          "description": "They appear to describe the same material issue."
+        },
+        {
+          "id": "new_evidence",
+          "description": "The new finding adds materially different evidence to a related issue."
+        },
+        {
+          "id": "different_issue",
+          "description": "They concern distinct material issues."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_objection_link"
+    },
+    {
+      "id": "semantic_drift",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "implementation_pass",
+        "case_return"
+      ],
+      "projection": [
+        "approved_invariant",
+        "scoped_diff",
+        "local_facts"
+      ],
+      "question": "Does this change appear to preserve the approved invariant? Do not infer unprovided behavior.",
+      "options": [
+        {
+          "id": "preserves_intent",
+          "description": "The shown change appears to preserve the stated invariant."
+        },
+        {
+          "id": "possible_material_change",
+          "description": "The shown change may alter the invariant or a required guarantee."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_local_delta_review"
+    },
+    {
+      "id": "memory_relation",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "observation_added"
+      ],
+      "projection": [
+        "new_observation",
+        "prior_observation"
+      ],
+      "question": "How does the new observation relate to the prior observation within their stated scope and versions?",
+      "options": [
+        {
+          "id": "compatible",
+          "description": "Compatible or supporting observations."
+        },
+        {
+          "id": "possibly_contradictory",
+          "description": "There may be a substantive conflict to investigate."
+        },
+        {
+          "id": "possibly_superseding",
+          "description": "The newer observation may supersede the prior applicability, subject to validation."
+        },
+        {
+          "id": "unrelated",
+          "description": "No relevant relationship is demonstrated."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_memory_link"
+    },
+    {
+      "id": "candidate_relevance",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "context_ready"
+      ],
+      "projection": [
+        "goal",
+        "candidate",
+        "oracle_contract"
+      ],
+      "question": "Is this proposed counterexample a relevant test candidate under the supplied oracle contract?",
+      "options": [
+        {
+          "id": "relevant",
+          "description": "Relevant and apparently within the stated valid-input domain."
+        },
+        {
+          "id": "invalid_candidate",
+          "description": "Apparently outside the valid-input domain or not testing the objective."
+        },
+        {
+          "id": "redundant_candidate",
+          "description": "Apparently duplicates an already stated test candidate."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "rank_test_candidates"
+    },
+    {
+      "id": "attention_needed",
+      "version": 1,
+      "mode": "shadow",
+      "triggers": [
+        "verification_failed",
+        "review_turn"
+      ],
+      "projection": [
+        "event_summary",
+        "known_blockers",
+        "pending_owner_questions"
+      ],
+      "question": "What kind of attention does the semantic content of this event suggest? Mandatory notifications remain outside this judgment.",
+      "options": [
+        {
+          "id": "coordinator_review",
+          "description": "The coordinator should inspect a new substantive issue."
+        },
+        {
+          "id": "owner_attention",
+          "description": "The event appears to require an unresolved owner decision."
+        },
+        {
+          "id": "routine_update",
+          "description": "The event appears routine within the existing task."
+        },
+        {
+          "id": "insufficient",
+          "description": "The supplied evidence does not support choosing another option."
+        }
+      ],
+      "depends_on": [],
+      "fallback": "coordinator",
+      "allowed_influence": "suggest_attention"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgenticArch normalized SemIf advice; not the upstream wire format",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ordered_options": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "scores": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "selected": {
+      "type": "string",
+      "minLength": 1
+    },
+    "calibration": {
+      "enum": [
+        "uncalibrated",
+        "workload_validated"
+      ]
+    },
+    "provenance": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Scorer provenance",
+      "type": "object",
+      "properties": {
+        "model_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tokenizer_revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "backend": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calibration_artifact_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "model_revision",
+        "tokenizer_revision",
+        "backend",
+        "prompt_version",
+        "calibration_artifact_digest"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "state_digest",
+    "ordered_options",
+    "scores",
+    "selected",
+    "calibration",
+    "provenance"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "comment": "Example only. Copy to ignored config/local.json after discovering actual capabilities; null values intentionally disable dispatch.",
+  "codex": {
+    "executable": null,
+    "model_ids": {
+      "luna": null,
+      "astra": null
+    },
+    "effective_identity_verified": false,
+    "client_kind": "custom_local_remote"
+  },
+  "semif": {
+    "installation_path": null,
+    "revision": null,
+    "backend": null,
+    "model_revision": null,
+    "mode": "direct"
+  },
+  "pro": {
+    "display_model": "GPT-6 Pro",
+    "origin": "https://chatgpt.com",
+    "computer_use_verified": false,
+    "skill_path": null,
+    "skill_name": "prepare-sol-pro-architecture-review",
+    "transport_mode": "manual",
+    "automate_chatgpt_permitted": false,
+    "permission_evidence_ref": null,
+    "synthetic_roundtrip_verified": false
+  },
+  "fable": {
+    "skill_path": null,
+    "provider": null,
+    "model_id": null,
+    "transport": null,
+    "skill_name": "fable-adversarial-review",
+    "bridge_skill": "claude-code:use-claude-code",
+    "requested_alias": "fable",
+    "requested_effort": "high"
+  },
+  "git": {
+    "review_repository": null,
+    "review_repository_name": "GPT-Pro-Escalation",
+    "write_verified": false
+  },
+  "state_directory": null,
+  "export_policy_file": null,
+  "local_helpers": {
+    "enabled": false,
+    "max_heavy_gpu_jobs": 1,
+    "memory_reserve_bytes": null,
+    "model_profiles": {},
+    "no_remote_fallback": true
+  }
+}
