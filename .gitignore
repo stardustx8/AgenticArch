@@ -24,3 +24,4 @@ private/
 *.log
 __pycache__/
 *.pyc
+eval/probes/secret_leak.jsonl

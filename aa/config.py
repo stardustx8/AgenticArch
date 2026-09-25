@@ -53,6 +53,9 @@ DEFAULTS: dict[str, Any] = {
         'claude': '~/.local/bin/claude',
         'timeout_s': 3600,
         'max_parallel': 3,
+        # Run Claude workers in Claude Code's OS sandbox + auto-mode classifier (needs
+        # bubblewrap and socat). Off until socat is installed on the workstation.
+        'claude_sandbox': False,
     },
     'triage': {
         # Codex model that proposes the tier (read-only inspection of the repo).

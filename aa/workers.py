@@ -71,6 +71,10 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 class Workers:
     def __init__(self, cfg: Config, runner: Runner = subprocess.run):
+        # Claude workers: OS sandbox (bubblewrap + socat) and the auto-mode safety classifier
+        # instead of unrestricted acceptEdits Bash. Codex workers already run in Codex's
+        # workspace-write sandbox.
+        self.claude_sandbox = bool(cfg['workers'].get('claude_sandbox', False))
         self.codex = str(cfg.path('workers', 'codex'))
         self.claude = str(cfg.path('workers', 'claude'))
         self.timeout = int(cfg['workers']['timeout_s'])
@@ -157,7 +161,10 @@ class Workers:
     def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
         cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
                '--output-format', 'json', '--no-session-persistence']
-        if write:
+        if write and self.claude_sandbox:
+            cmd += ['--permission-mode', 'auto', '--settings', json.dumps(sandbox_settings(cwd, extra_dirs)),
+                    '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
+        elif write:
             cmd += ['--permission-mode', 'acceptEdits',
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
         else:
@@ -175,7 +182,10 @@ class Workers:
         log.write_text(f'$ {" ".join(cmd)}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}')
         data = _json_or_none(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else '')
         if not data:
-            return Result(False, '', error=p.stderr[-2000:] or 'no JSON result')
+            err = (p.stderr + p.stdout)[-2000:] or 'no JSON result'
+            if 'sandbox required but unavailable' in err:
+                raise BillingError('Claude sandbox unavailable (install bubblewrap and socat): ' + err[:300])
+            return Result(False, '', error=err)
         seen = list((data.get('modelUsage') or {}).keys())
         text = data.get('result') or ''
         structured = data.get('structured_output')
@@ -190,6 +200,17 @@ class Workers:
             err = 'missing structured output'
         usage = {'api_equivalent_usd': data.get('total_cost_usd'), **(data.get('usage') or {})}
         return Result(not err, text, structured, seen, usage, error=err)
+
+
+def sandbox_settings(cwd: Path, extra_dirs: tuple[Path, ...] = ()) -> dict:
+    """Claude Code sandbox: writes only in the job directories, credentials unreadable,
+    refuse to start without a working sandbox (never silently unsandboxed)."""
+    return {'sandbox': {
+        'enabled': True, 'allowUnsandboxedCommands': False, 'failIfUnavailable': True,
+        'filesystem': {'allowWrite': [str(cwd), *map(str, extra_dirs)],
+                       'denyRead': ['~/.ssh', '~/.codex/auth.json', '~/.claude/.credentials.json',
+                                    '~/.config/agenticarch', '~/.local/share/agenticarch/aa.sqlite']},
+    }}
 
 
 def _json_or_none(text: str) -> dict | None:

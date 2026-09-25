@@ -604,6 +604,34 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(BillingError):
                 w.verify_billing('claude')
 
+    def test_claude_sandbox_mode_uses_auto_and_restricts_writes(self):
+        out = json.dumps({'result': 'ok', 'is_error': False, 'modelUsage': {'claude-opus-5-5': {}}})
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, out, ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
+                                                     'workers': {'claude_sandbox': True}})
+            w = Workers(cfg, runner=runner)
+            w.verify_billing = lambda cli: None
+            self.assertTrue(w.execute(LANES['opus_high'], 'p', Path(tmp)).ok)
+        cmd = runner.call_args[0][0]
+        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'auto')
+        settings = json.loads(cmd[cmd.index('--settings') + 1])['sandbox']
+        self.assertTrue(settings['failIfUnavailable'])
+        self.assertEqual(settings['filesystem']['allowWrite'], [tmp])
+        self.assertIn('~/.ssh', settings['filesystem']['denyRead'])
+
+    def test_missing_sandbox_blocks_instead_of_running_unsandboxed(self):
+        from aa.workers import BillingError
+        runner = mock.Mock(return_value=subprocess.CompletedProcess(
+            [], 1, '', 'Error: sandbox required but unavailable: socat not installed'))
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
+                                                     'workers': {'claude_sandbox': True}})
+            w = Workers(cfg, runner=runner)
+            w.verify_billing = lambda cli: None
+            with self.assertRaises(BillingError):
+                w.execute(LANES['opus_high'], 'p', Path(tmp))
+
     def test_codex_command_is_subscription_exec_with_effort(self):
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
         with tempfile.TemporaryDirectory() as tmp:
