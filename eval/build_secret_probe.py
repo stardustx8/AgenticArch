@@ -58,7 +58,8 @@ BENIGN = [
     'token_count = len(tokens)', 'PASSWORD_MIN_LENGTH = 12', 'JWT_SECRET=${JWT_SECRET:?must be set}',
     'integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC"',
     'icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="',
-    'MOCK_STRIPE_KEY = "' + 'sk_' + 'test_' + 'x' * 24 + '"',  # split so push protection ignores the placeholder 'secret: !vault |\n  $ANSIBLE_VAULT;1.1;AES256',
+    # The Stripe-style placeholder is assembled at runtime so GitHub push protection ignores it.
+    'MOCK_STRIPE_KEY = "' + 'sk_' + 'test_' + 'x' * 24 + '"', 'secret: !vault |\n  $ANSIBLE_VAULT;1.1;AES256',
     '# Set GITHUB_TOKEN in the repository secrets, never in this file.', 'api_key: "{{ vault_api_key }}"',
     'password = getpass.getpass("Password: ")', 'REDIS_URL=redis://localhost:6379/0',
     'DATABASE_URL=postgres://postgres:postgres@localhost:5432/app_dev', 'hash = bcrypt.hashpw(pw, bcrypt.gensalt())',
