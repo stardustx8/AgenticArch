@@ -22,3 +22,5 @@ private/
 *.zip
 *.bundle
 *.log
+__pycache__/
+*.pyc

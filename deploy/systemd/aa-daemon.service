@@ -1,0 +1,13 @@
+[Unit]
+Description=AgenticArch coordinator daemon (aa)
+After=network-online.target aa-clm.service
+
+[Service]
+ExecStart=/usr/bin/python3 %h/dev/AgenticArch/bin/aa daemon
+Restart=on-failure
+RestartSec=15
+# Workers inherit this environment; API-key variables are scrubbed per job anyway.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
