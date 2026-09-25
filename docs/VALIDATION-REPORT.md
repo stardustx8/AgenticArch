@@ -6,7 +6,7 @@ Date: 2026-09-25. Preparation environment: Linux, Python 3.13.5, Node 22.16.0 an
 
 | Check | Result | Scope |
 | --- | --- | --- |
-| `python3 -m unittest discover -s tests -v` | 189 tests passed | Original policy, evidence, convergence, installer and decision-plane checks, plus peer routing, exact model/effort restrictions, subscription eligibility, CLM wire validation, token bounds, effort acknowledgments, quota attribution and reviewer epochs; preserves 13 concurrent CLM adapter tests and 25 routing/compiler tests (only the latter fixture path changed) |
+| `python3 -m unittest discover -s tests -v` | 197 tests passed (189 plus 8 PR #1 participant/score regressions, reconciled 2026-09-25; on macOS set a non-symlinked `TMPDIR`) | Original policy, evidence, convergence, installer and decision-plane checks, plus peer routing, exact model/effort restrictions, subscription eligibility, CLM wire validation, token bounds, effort acknowledgments, quota attribution and reviewer epochs; preserves 13 concurrent CLM adapter tests and 25 routing/compiler tests (only the latter fixture path changed) |
 | `python3 tools/check_kit.py` | Passed | JSON syntax, six policy lanes/eight routes, evidence references, nine operators, CLM fixture, both harness profiles, portable skill consistency and local links |
 | `python3 tools/demo_decision_plane.py` | Passed | Synthetic decisions; no model inference or action |
 | `python3 tools/preview_routing.py --harness codex` and `--harness pi` | Passed | Synthetic subscription bindings render the expected candidate requests; no live tokenizer or provider call |

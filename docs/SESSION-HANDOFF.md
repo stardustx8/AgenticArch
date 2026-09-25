@@ -33,3 +33,7 @@ Read START-HERE and the implementation prompt, then run offline checks. On the w
 ## Closeout
 
 Refresh main and preserve other sessions. Update this handoff, status and affected decisions with actual changes, commands/results, live-versus-fixture evidence, blockers and next action. Read back publication; never infer it from permission metadata or an unreferenced Git object.
+
+## 2026-09-25 reconciliation
+
+PR #1 (participant-bound policy) is merged into `main`. `main`'s participant implementation (`claude` role, `model_id`, `review_epoch`) is canonical, and the PR's regressions are ported. See [INTEGRATION-RECONCILIATION-2026-09-25.md](INTEGRATION-RECONCILIATION-2026-09-25.md). No parallel integration is pending.
