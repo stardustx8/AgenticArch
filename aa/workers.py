@@ -62,6 +62,7 @@ def child_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items()
            if k not in SCRUB and not k.startswith(('CLAUDE_CODE_', 'CLAUDECODE', 'CODEX_SANDBOX'))}
     env['PATH'] = f"{Path('~/.local/bin').expanduser()}:{env.get('PATH', '/usr/bin:/bin')}"
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
     return env
 
 

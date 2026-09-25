@@ -1,52 +1,35 @@
-# Owner requirements and decision record
+# Owner requirements
 
-Version 2.0, 2026-09-25. Normative requirements, not a claim of installed functionality. R04-R06, R11, R14, R16 and R19 have been explicitly amended by the owner; historical versions remain in Git.
+Version 3.0, 2026-09-25 (owner Q&A). Supersedes v2 where they conflict; v2 is in Git history.
 
-## Purpose
+## Goal
 
-Deliver a self-contained public architecture and implementation kit in `stardustx8/AgenticArch`, integrated on `main`, that can be developed across sessions and machines. Optimize dependable, high-quality completed work and included subscription usage. The owner welcomes setup changes and local models when they materially help; this is not blanket permission for installations, exports, new charges or weakened controls.
+A daily working tool soon, not a specification kit. Few Pro cases (estimated up to 10-20
+a day); manual one-line Pro prompts are acceptable.
 
-| ID | Current requirement | Acceptance anchor |
+## Requirements
+
+| ID | Requirement | Where |
 | --- | --- | --- |
-| R01 | Complete architecture, guidance, config, code, tests and implementation entry point. | README; check_kit |
-| R02 | Publish actual changes to AgenticArch main and verify remote state. | PUBLISHING; remote readback |
-| R03 | Standalone public specification, independent of private source material. | Documentation/link checks |
-| R04 | Luna uses low/high only; high for substantive bounded work, low for narrow steps. | policy; core/effort tests |
-| R05 | Medium-tough work admits Astra high and Opus 5.5 as equal peers. | model-routing; routing tests |
-| R06 | Tough work, architecture/research and consequential design use GPT-6 Pro web with adversarial Claude review. | hard floor and case tests |
-| R07 | Retain prepare-sol-pro-architecture-review as the exact handoff skill identifier. | skills tree |
-| R08 | Prepare scoped evidence ZIP, exact manifest and prompt targeting GPT-Pro-Escalation. | case templates; skill |
-| R09 | Desired automatic Pro upload/continuation requires a permitted, supported Computer Use path; manual recovery remains available. | COMPUTER-USE-GATE |
-| R10 | Start fable-adversarial-review after Pro's verified complete initial contribution. | protocol and receipts |
-| R11 | Pro and a selected Fable 5.1 or Opus 5.5 participant challenge and improve the solution through Git. | explicit model binding |
-| R12 | Continue every Pro round in the same established chat for the case. | private exact binding |
-| R13 | Continue until both approve the same result; pauses do not count as agreement. | convergence tests |
-| R14 | Return to the original local Codex or Pi coordinator for faithful implementation. | original task/session binding |
-| R15 | Reconcile facts unknown to reviewers; document local adaptations and reopen material changes. | LOCAL-DELTA and checks |
-| R16 | Replace the local semantic backend with CLM. No cloud decision dependency. | CLM adapter and tests |
-| R17 | Revise both actual skills directly, not separate upgrade prompts. | exact-name skill files |
-| R18 | Preserve scoped evidence, primary-source citations, independent challenge and manual recovery. | protocol and templates |
-| R19 | Support the actual Linux workstation/custom Codex and a qualified Pi alternative. | private capability inventory |
-| R20 | Use local models/tools and amend the setup where justified; avoid unnecessary agent complexity. | workstation design |
-| R21 | Document requirements separately from engineering choices, with acceptance mappings. | this record |
-| R22 | Investigate useful semantic operators beyond model routing and qualify each family. | operator catalog/evaluation |
-| R23 | Maintain full reusable development context on GitHub for future sessions/places. | START-HERE; handoff; decisions |
-| R24 | Remote execution uses normal Codex/Claude subscriptions, not API credits or silent paid overflow. | billing eligibility tests |
-| R25 | Supply both harness architecture packages when trade-offs justify them. | harnesses/codex and harnesses/pi |
-| R26 | Adapt reasoning dynamically between generations using a restricted efficient effort menu, not every available setting. | effort gate and host adapters |
-| R27 | Research primary benchmarks and robust authored reviews; preserve exact versions, uncertainty and evidence classes. | research registry |
-| R28 | Provide a structured CLM decision catalog covering model, task fit and effort/lease choices. | model-routing JSON and rendering |
-| R29 | Prepare Fable 5.5 as a future replacement, activated only after release/access/regression verification. | pending model exclusion tests |
-| R30 | Optimize subscription consumption as well as API-equivalent diagnostics without assuming their ratios match. | quota attribution/evaluation |
+| O01 | Coordinator runs as a background daemon on the Linux workstation; the Codex desktop app is the front end (skill), plus `aa` CLI. | aa/daemon.py, skills/agenticarch |
+| O02 | Tasks are triaged by the Codex model and CLM; on disagreement the owner decides (ntfy). The tier is authoritative for the worker. | aa/tasks.py |
+| O03 | Luna low (routine), Luna high (bounded), Astra high or Opus 5.5 medium/high (medium-tough), Pro deep case (tough/architecture/research/security/migration/irreversible design). | aa/workers.py, aa/tasks.py |
+| O04 | CLM (Contrastive-LM, local, loopback) steers from day one: tier vote, peer choice, context selection; effort once per-generation switching exists. | aa/clm.py |
+| O05 | Deep case: Pro drafts -> Opus 5.5 high and Astra high challenge and co-edit ~5 rounds -> Pro reviews GO/CLARIFY; after 2 reviews without GO pause and ask the owner. | aa/cases.py |
+| O06 | Fable 5.1 dropped; Fable 5.5 replaces Opus as challenger after release and qualification. No gpt-6-sol/terra routes. | config deep.challengers |
+| O07 | Pro uses the ChatGPT GitHub connector (write verified by owner): reads the case branch, writes its turns, and after GO implements on a target-repo branch. No evidence ZIP. | aa/prompts/pro_*.md |
+| O08 | Owner is notified by self-hosted ntfy (Tailscale) with the one-line prompt and reply buttons. | aa/notify.py |
+| O09 | Cases live in the new private repo stardustx8/GPT-Pro-Escalation; AgenticArch stays public and case-free. | config case_repo |
+| O10 | After GO, local test failures are fixed by Opus high; design problems go back to Pro. | aa/cases.py |
+| O11 | No cross-model code-review loop for normal tasks. | aa/tasks.py |
+| O12 | Required checks: per-repo `.agenticarch.toml`, else autodetect confirmed once by the owner. | aa/checks.py |
+| O13 | Remote execution subscription-only (ChatGPT Pro, Claude Max); never API credits or paid overflow. | aa/workers.py |
+| O14 | Per-generation effort switching via a Codex fork used only for headless workers; desktop app unchanged. | not yet implemented |
+| O15 | Skills installed on the workstation and the Mac. | skills/, tools/install_skills.py |
+| O16 | Git: branch + PR per milestone; SSH auth. Moderate cleanup: compat layers removed, Pi parked, docs trimmed. | this revision |
 
-## Reference environment
+## Environment (verified 2026-09-25)
 
-Owner-reported: Linux, RTX PRO 6000 Blackwell Workstation Edition with 96 GB VRAM, 128 GB ECC host memory, custom Codex using local and remote models. Drivers, available memory, exact runtimes, provider access and local skill helpers still require read-only discovery. No unique device identifier or private address is needed in this public package.
-
-## Engineering choices and open gates
-
-Selected engineering baseline: one local coordinator, SQLite/outbox, ordinary Git, immutable evidence, explicit per-case review epochs, shadow-mode CLM and one heavy optional local helper. Astra/Opus peer equality is eligibility, not identical measured ability. Opus medium/high is a starter menu; no exact quota-optimal frontier has been measured.
-
-Use the unmodified Claude Code subscription worker in either harness; do not transfer its OAuth tokens into a third-party provider. Native Pi OpenAI subscription execution remains separately qualified. Manual Pro web handoff remains the default because current standard Computer Use excludes automating ChatGPT itself. These are integration gates, not silent model substitutions.
-
-Real case data and local credential/session state remain private. Creating/provisioning the separate review repository and installing the runtime are distinct scoped actions. Preserve existing authorization within scope and ask only for genuinely missing decisions.
+Linux workstation, RTX PRO 6000 Blackwell 96 GB, ~122 GB RAM, Codex CLI 0.155.1 (ChatGPT
+login) plus the Codex desktop app, Claude Code CLI 2.1.282 (Claude Max login), rootless
+Docker, Tailscale to the owner's iPhone. Local AI Lab models (artemis, ortenzya) share the GPU.

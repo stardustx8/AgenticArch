@@ -165,6 +165,8 @@ class Env:
 
 def write_done(lane, cwd, prompt, extra):
     (cwd / 'done.txt').write_text('ok')
+    (cwd / '__pycache__').mkdir(exist_ok=True)          # worker ran tests itself
+    (cwd / '__pycache__' / 'app.cpython-314.pyc').write_bytes(b'x')
     return Result(True, 'implemented', None, [lane.model])
 
 
@@ -195,7 +197,8 @@ class LocalFlowTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_routine_task_agreeing_votes_runs_luna_low_and_delivers_branch(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'),
+                       checks='test -f done.txt && touch artefact.cache')
         tid = self.env.app.tasks.create(self.env.target, 'rename a thing')
         self.env.run()
         t = self.env.db.task(tid)
@@ -204,6 +207,10 @@ class LocalFlowTests(unittest.TestCase):
         self.assertIn(f'aa/{tid}', sh(self.env.target_origin, 'git', 'branch', '--list'))
         self.assertEqual(sh(self.env.target, 'git', 'show', f'aa/{tid}:done.txt'), 'ok')
         self.assertFalse((self.env.cfg.worktrees / tid).exists())
+        # One squashed commit on top of the base; no check artefacts committed.
+        base = self.env.db.task(tid)['base_ref']
+        self.assertEqual(sh(self.env.target, 'git', 'rev-list', '--count', f'{base}..aa/{tid}'), '1')
+        self.assertEqual(sh(self.env.target, 'git', 'diff', '--name-only', f'{base}..aa/{tid}'), 'done.txt')
 
     def test_disagreement_asks_owner_then_uses_pick(self):
         self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('tough'))

@@ -1,21 +1,26 @@
 # Implementation status
 
-2026-09-25, kit revision 2.
+2026-09-25, runtime v0.1 (branch m1-working-runtime).
 
-## Implemented and offline-testable
+## Working and verified live on the workstation
 
-Shared v2 policy and model/evidence registry; CLM request rendering and real loopback-only HTTP client; strict typed response/deployment/token-limit validation; subscription-only route eligibility and Astra/Opus peer tiers; joint effort/lease option generation; generation acknowledgment/state invalidation; quota attribution; participant-bound review epochs and original completion/evidence safeguards.
+- `aa` daemon (systemd user), SQLite state, CLI, ntfy push + reply buttons over Tailscale.
+- Subscription workers: `codex exec` gpt-6-luna (live task t0925-b68ad, 13 s) and `claude -p`
+  claude-opus-5-5 medium (live task t0925-1186d, 21 s), both with checks passing.
+- Local CLM: vLLM Qwen3-8B encoder + clm-serve; tier votes, peer choice, context ranking
+  with exact-token preflight and deployment digest; decisions logged.
+- Triage with owner pick on disagreement (exercised live), checks from `.agenticarch.toml`.
+- `aa doctor`: both subscriptions, CLM, ntfy, private case-repo access all OK.
 
-Both harness packages are present on main. Codex includes a native-checkpoint host contract; Pi includes a TypeScript setter/readback/abort adapter and structural fixture. The two actual skills are revised with self-contained references and the existing dry-run, backup-preserving installer. Requirements, architecture, evidence limits and cross-session handoff are current.
+## Implemented, tested offline, not yet exercised live
 
-The concurrently published generic-choice CLM API and its 13 tests are preserved through compatibility exports. The concurrent v1 routing compiler/catalog and its 25 assertions-preserving tests are retained through an explicit versioned compatibility boundary. The integrated Python suite passes 189 tests. See the revision ledger for the explicit merge and requirement-ID mapping.
+- Deep-case flow end to end (Pro draft, Opus x Astra rounds, GO/CLARIFY, owner questions,
+  pause/resume, post-GO verification, local fixes, DESIGN_ISSUE back to Pro).
+  Needs a first real case with a GitHub target repo.
+- Autodetected checks confirmation, retries and lane escalation, scope enforcement.
 
-## Not implemented or not locally qualified
+## Not implemented
 
-The complete persistent coordinator/outbox supervisor, actual native Codex patch integration, full Pi extension wiring, installed CLM encoder/head/tokenizer, live subscription/billing observers, native Pi provider authorization, target-project execution, skill installation and real Pro/Claude case exchange remain local implementation/qualification work. No independent two-model review of this kit has been performed.
-
-Automatic Pro web operation remains unqualified; manual transfer is the default. The operational review repository has not been provisioned here. Fable 5.5 is pending, with no active route. No actual subscription saving or optimal local effort frontier has been measured.
-
-## Verification and publication
-
-Read [the validation report](docs/VALIDATION-REPORT.md). Passing tests establish fixture/contract behavior only. Verify the actual remote main revision and full source tree when publishing; source availability does not imply runtime installation. New sessions start with START-HERE and SESSION-HANDOFF.
+- Codex fork with per-generation effort checkpoint (effort is fixed per job today).
+- CLM fine-tuning on logged decisions (zero-shot accuracy is limited; see RUNTIME).
+- Skill installation on the Mac (skills are in `skills/`; installer ready).

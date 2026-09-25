@@ -71,10 +71,18 @@ def changed_paths(cwd: Path) -> list[str]:
     return paths
 
 
+# Never committed by the coordinator, even when a repo lacks a .gitignore for them.
+ARTEFACTS = ('__pycache__', '*.pyc', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'node_modules',
+             '.venv', '.tox', '.coverage', '.DS_Store')
+
+
 def commit_all(cwd: Path, message: str) -> str | None:
     if not changed_paths(cwd):
         return None
-    git(cwd, 'add', '-A')
+    git(cwd, 'add', '-A', '--', '.', *(f':(exclude,glob)**/{a}' for a in ARTEFACTS),
+        *(f':(exclude,glob)**/{a}/**' for a in ARTEFACTS if '*' not in a))
+    if not git(cwd, 'diff', '--cached', '--name-only'):
+        return None
     git(cwd, 'commit', '-q', '-m', message)
     return head(cwd)
 

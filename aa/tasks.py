@@ -286,11 +286,14 @@ class TaskFlow:
             t['data']['last_failure'] = f'worker error: {res.error[:1500]}'
             self._retry_or_escalate(t)
             return
+        # Snapshot the worker's changes so check artefacts (caches, builds) never get committed.
+        git.commit_all(wt, f'aa wip {t["id"]} pass {passes} ({lane.name})')
         self.db.update_task(t['id'], status='VERIFY')
 
     def _verify(self, t: dict) -> None:
         wt = Path(t['worktree'])
         results = checks_mod.run(t['data'].get('checks') or {}, wt)
+        git.discard(wt)                      # drop artefacts produced by the checks
         t['data']['checks_result'] = checks_mod.summary(results)
         if all(r.ok for r in results):
             self.db.decision_outcome(t['id'], 'tier', 'pass')
@@ -324,6 +327,7 @@ class TaskFlow:
     def _deliver(self, t: dict, results) -> None:
         wt = Path(t['worktree'])
         title = t['prompt'].strip().splitlines()[0][:72]
+        git.git(wt, 'reset', '-q', '--soft', t['base_ref'])     # squash the wip snapshots
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
                                  f'Checks:\n{checks_mod.summary(results)}')
         stat = git.diffstat(wt, t['base_ref'])

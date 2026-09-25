@@ -22,7 +22,7 @@ Its 28,000-token evaluator view must not be copied into a 2048-token CLM deploym
 
 ## Pi adaptation
 
-The [Pi package](../harnesses/pi/README.md) supplies an adapter for the verified thinking setter/readback/abort surfaces. Bind it only at an awaited pre-generation boundary. Extension errors alone may not stop Pi; the integration must honor explicit abort and prove that no provider request escaped. A setting clamp is an error, not successful application. Native provider prefix preservation must be tested; a setter's presence does not prove cache behavior.
+The [Pi package](../parked/pi/README.md) supplies an adapter for the verified thinking setter/readback/abort surfaces. Bind it only at an awaited pre-generation boundary. Extension errors alone may not stop Pi; the integration must honor explicit abort and prove that no provider request escaped. A setting clamp is an error, not successful application. Native provider prefix preservation must be tested; a setter's presence does not prove cache behavior.
 
 Pi delegating to Codex uses the Codex worker's native checkpoint, not Pi's local thinking setter. Claude worker effort changes require a verified native surface; otherwise keep effort fixed for the current worker and change it only when starting the next authorized worker. Do not patch the Claude Code binary or rewrite private thinking blocks.
 

@@ -12,6 +12,7 @@ worktree snapshot; every non-zero exit blocks completion.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -76,7 +77,8 @@ def run(checks: dict[str, str], cwd: Path, timeout: int = 1800) -> list[CheckRun
     for name, cmd in checks.items():
         try:
             p = subprocess.run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True,
-                               timeout=timeout, stdin=subprocess.DEVNULL)
+                               timeout=timeout, stdin=subprocess.DEVNULL,
+                               env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
             out = (p.stdout + p.stderr)[-6000:]
             results.append(CheckRun(name, cmd, p.returncode, out))
         except subprocess.TimeoutExpired:

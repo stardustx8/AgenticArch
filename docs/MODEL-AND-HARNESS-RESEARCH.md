@@ -1,6 +1,6 @@
 # Model, harness and effort research
 
-Checked 2026-09-25. This is an evidence-based starting policy, not a claim of a universal optimum. The [machine-readable registry](../config/evidence-registry.json) records source type, scope, observations and exclusions. Its descriptive source IDs are retained as supplemental evidence; the active routing catalog uses the separate S-number registry. See [the integration record](INTEGRATION-RECONCILIATION.md) for namespace and profile mappings. Public benchmark results are priors; they do not qualify a local subscription route.
+Checked 2026-09-25. This is an evidence-based starting policy, not a claim of a universal optimum. The [machine-readable registry](../config/research-evidence.json) records source type, scope, observations and exclusions. Its descriptive source IDs are retained as supplemental evidence; the active routing catalog uses the separate S-number registry. See [the integration record](archive/README.md) for namespace and profile mappings. Public benchmark results are priors; they do not qualify a local subscription route.
 
 ## Harness conclusion
 
@@ -8,7 +8,7 @@ The [HarnessTax study](https://arena.ai/blog/coding-agents-harness-tax) supports
 
 Do not remove safety or recovery to reduce prompt size. [ARC Prize's direct Astra measurements](https://arcprize.org/blog/astra) show a counterexample to universally minimizing scaffolding: retaining useful state can improve both outcomes and resource use. The engineering target is necessary context and effective state handling, not the smallest possible system prompt.
 
-Keep both [Codex](harnesses/CODEX.md) and [Pi](harnesses/PI.md) profiles on main with shared policy. Codex is the rollout default because it preserves the existing worker path. Pi is a serious evaluation candidate, not a rejected option. Pi delegating to native workers and Pi running a native minimal model loop are different treatments. Do not claim the latter's savings for the former.
+Keep both [Codex](harnesses/CODEX.md) and [Pi](../parked/pi/PI.md) profiles on main with shared policy. Codex is the rollout default because it preserves the existing worker path. Pi is a serious evaluation candidate, not a rejected option. Pi delegating to native workers and Pi running a native minimal model loop are different treatments. Do not claim the latter's savings for the former.
 
 ## Model and effort decisions
 
@@ -31,4 +31,4 @@ The [Sonar first-hand Java evaluation](https://www.sonarsource.com/blog/claude-o
 
 ## Promotion rule
 
-Run matched local tasks for frontend, backend, debugging, integration, test writing and research handoffs. Preserve identical acceptance tests, tool access, scope and replayable evidence. Measure model/effort/harness combinations, including rework and final verification, in balanced order. Use held-out projects and time windows. Keep finite quota pools distinct. Promote only after quality and safety non-inferiority plus useful quota/latency gains; sample-size and tolerance decisions must be recorded before comparing outcomes. See [the quota protocol](QUOTA-EVALUATION.md).
+Run matched local tasks for frontend, backend, debugging, integration, test writing and research handoffs. Preserve identical acceptance tests, tool access, scope and replayable evidence. Measure model/effort/harness combinations, including rework and final verification, in balanced order. Use held-out projects and time windows. Keep finite quota pools distinct. Promote only after quality and safety non-inferiority plus useful quota/latency gains; sample-size and tolerance decisions must be recorded before comparing outcomes. See [the quota protocol](archive/QUOTA-EVALUATION.md).

@@ -43,3 +43,34 @@ Primary experiments, vendor claims, independent evaluations and firsthand editor
 The integration preserves concurrent commits through 294ebcb0, including f3538855 and 10592526, retaining the earlier revision ledger, its explicitly mapped requirement IDs and all 13 generic-choice tests. Keep its public imports stable using an unchanged compatibility module; new routing uses the stricter supervised client. Neither interface grants permission or proves deployment identity. The subsequent v1 routing/compiler source and its 25 tests remain available through an explicit compatibility boundary; active profiles use the v2 catalog. The six subsequent research/profile additions are retained with explicit active/supplemental mappings in INTEGRATION-RECONCILIATION.md.
 
 For future entries record date, requirement impact, evidence, actual verification, alternatives and rollback. Do not silently replace history with a new unsupported certainty.
+
+## D011: working runtime over further specification, added 2026-09-25
+
+Owner Q&A: build a daemon that does real work now. `aa/` implements the flows with a
+stdlib-only coordinator; `reference/` validators are kept but the runtime wins on
+conflict. Compatibility layers (v1 routing, generic-choice CLM API) removed; Pi parked in
+`parked/pi`; superseded docs moved to `docs/archive`. Rollback: previous commits on main.
+
+## D012: deep flow Pro -> Opus x Astra -> Pro, supersedes D003
+
+Pro drafts; Opus 5.5 high and Astra high co-edit through up to 5 rounds; Pro gives GO or
+CLARIFY and implements after GO through the GitHub connector. Two CLARIFY reviews pause
+the case. Rationale: at most ~2 manual Pro turns per case while keeping adversarial
+challenge. Fable 5.1 dropped; Fable 5.5 later replaces Opus.
+
+## D013: Pro transport via GitHub connector, supersedes D006
+
+No ZIP. The owner pastes a one-line prompt (ntfy) into the case's Pro chat; Pro reads and
+writes the private case branch. Automatic ChatGPT UI driving is still not used.
+
+## D014: CLM zero-shot with abstention threshold, added
+
+CLM is live from day one but zero-shot accuracy is limited (5/8 best wording on a probe
+set, both tough examples missed). Votes below confidence 0.2 abstain; every decision is
+logged with the final choice and outcome to enable fine-tuning. Owner resolves
+disagreements, which also produces labels.
+
+## D015: effort per job now, Codex fork later, amends D008
+
+Effort is fixed per lane per job. Per-generation switching needs a Codex fork used only
+for headless workers (owner decision); scheduled as the next milestone.

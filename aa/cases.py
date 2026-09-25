@@ -282,6 +282,7 @@ class CaseFlow:
         elif fresh:
             git.git(wt, 'reset', '-q', '--hard', f'origin/{branch}')
         results = checks_mod.run(t['data'].get('checks') or {}, wt)
+        git.discard(wt)                      # drop artefacts produced by the checks
         c['data']['checks_result'] = checks_mod.summary(results)
         if all(r.ok for r in results):
             git.git(wt, 'push', '-q', 'origin', f'HEAD:{branch}', check=False)

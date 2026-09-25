@@ -1,35 +1,58 @@
-# Architecture: one decision core, two harnesses
+# Architecture
 
-Version 2, 2026-09-25. The reference code is executable; host integration and real model evaluation remain local qualification work.
+Version 3, 2026-09-25. Implemented in `aa/`; operations in [RUNTIME](RUNTIME.md).
 
-## Components and boundaries
+## Shape
 
-The coordinator owns the task, scope, permissions, state transitions and evidence ledger. Its implementation can bind to custom Codex or Pi. Shared components are the model-routing catalog, hard policy, CLM adapter, verification rules, review protocol and private transactional state. Avoid two divergent products or a distributed agent platform.
+One deterministic coordinator daemon owns all state (SQLite), all git operations and all
+check runs. Models only produce text and file edits inside a worktree or a case
+directory. The local CLM gives votes and rankings; it never authorizes anything.
 
-CLM supplies contrastive judgments over a bounded context and declared candidate descriptions. A generation model implements code or conducts deep review. Deterministic tools establish observed compilation, test and change results. None of those roles implies authority for the others.
+```text
+owner (Codex desktop skill / aa CLI / ntfy buttons)
+            |
+        aa daemon ── SQLite (tasks, cases, events, decisions, inbox)
+       /    |     \
+  CLM     workers   git: target repos (worktrees, aa/* branches)
+ (local)  codex exec (Luna, Astra)      case repo GPT-Pro-Escalation (case/<id>)
+          claude -p  (Opus 5.5)                   ^
+                                                  | GitHub connector
+                                          GPT-6 Pro in ChatGPT web
+```
 
-Use SQLite for local transactional task/case state and an outbox, ordinary Git for durable versioned artifacts, and filesystem-scoped worker processes. Persist before external submission; record an idempotency marker; reconcile uncertain sends before retrying. Never convert an unknown send into a second Pro conversation.
+## Roles
 
-## Request path
+| Tier | Worker |
+| --- | --- |
+| routine | GPT-6 Luna low |
+| bounded | GPT-6 Luna high |
+| medium_tough | GPT-6 Astra high, Claude Opus 5.5 medium or high (CLM picks, Astra default) |
+| tough, or any Pro category | Deep case: GPT-6 Pro drafts, Opus 5.5 high and Astra high challenge, Pro decides GO and implements |
 
-Capture requirements, current working-tree snapshot, approved checks and exclusions. Identify architecture/research/consequential design before choosing a worker. Apply [policy floors](ROUTING-AND-VERIFICATION.md), then reject unavailable, unqualified, wrong-billing and exhausted routes. `reference/routing.py` compiles the surviving actions into compact CLM descriptions. Unknown subscription capacity is not zero cost, and high semantic similarity is not proof of competence.
+Fable 5.5 will replace Opus as the Claude challenger once released and qualified
+(config `deep.challengers`). Fable 5.1 is not used.
 
-Dispatch through the selected [Codex](../harnesses/codex/README.md) or [Pi](../harnesses/pi/README.md) profile. Keep only relevant tools/context active while retaining security, approvals, cancellation and provenance. Job envelopes bind task ID, session, snapshot, permitted paths, provider identity, effort, billing method and budget. Recheck the binding immediately before execution.
+## Invariants
 
-For fixed-model workers, the [effort gate](DYNAMIC-REASONING.md) may revise effort for a few upcoming generations. It cannot rewrite the overall task's risk classification, bypass Pro review or switch a running generation's model. Tool output enters history before the next decision.
+- Subscription-only: API-key variables are scrubbed from every worker, auth mode is
+  verified before dispatch, Claude's reported model must match the requested one.
+- Completion = the coordinator's own check run on the committed snapshot passes.
+  A model's "done", a debate consensus or a GO is never completion by itself.
+- Write scope: workers write only their worktree; challengers only `cases/<id>/`;
+  Pro only the case branch and, after GO, `aa/case-<id>` in the target repo.
+- Delivery is a branch. Merging, deploying and publishing stay with the owner.
+- Crash safety: every step is idempotent over stored state; restart resumes.
+- Private data: cases live in the private case repo, never in this public repo.
 
-After each substantive pass, inspect the real diff and run the approved checks on that exact snapshot. CLM may suggest a missing requirement test or next diagnostic, but cannot waive the evidence gate. Record failures, including pre-existing failures; resolve or explicitly disposition them rather than silently marking complete.
+## Code map
 
-## Deep work
+`aa/config.py` defaults + `~/.config/agenticarch/aa.toml`; `aa/db.py` schema;
+`aa/tasks.py` triage/routing/work/verify; `aa/cases.py` deep flow; `aa/workers.py`
+CLI execution and billing guard; `aa/clm.py` CLM decisions (uses `reference/clm.py`
+validation); `aa/checks.py`; `aa/notify.py`; `aa/daemon.py`; `aa/cli.py`;
+`aa/prompts/*.md` every model-facing text.
 
-Pro authors the complete initial case solution. A selected Claude participant challenges it independently, then both improve it through the review repository. Their agreement applies to exact solution, requirement and evidence digests and the frozen participant binding. The original coordinator fetches the accepted commit, reconciles newly discovered local facts and implements. Material architecture/data/safety changes reopen the same case and Pro chat. See [the complete protocol](ESCALATION-PROTOCOL.md).
-
-## State and failure recovery
-
-Keep model sessions, case-to-chat bindings, bundles, worker tokens and machine paths private. Git stores sanitized requirements and design knowledge. On restart, reconstruct from durable records, invalidate effort leases, verify the observed remote head and resume only the original case/task binding. Duplicate outputs are deduplicated by case/turn/digest, not by their prose.
-
-A missing local CLM falls back to deterministic routing/inspection, not a cloud classifier. Missing subscription access pauses that route, not a switch to API billing. A provider safeguard or fallback is not bypassed; record actual identity and pause acceptance when it differs from the required one. Debates and retries have finite per-run budgets that pause without fabricating agreement.
-
-## Acceptance boundary
-
-The kit's offline tests validate contracts and failure handling. They do not establish installed GPU behavior, provider billing, full host cancellation semantics, long-session cache retention or end-to-end autonomous implementation. Follow [the phased plan](IMPLEMENTATION-PLAN.md) and [the acceptance matrix](ACCEPTANCE-TESTS.md).
+`reference/` holds the earlier contract validators (policy, effort leases, quota
+attribution, decision-plane operators). They are tested and reusable but describe the
+pre-runtime design where it differs (e.g. Pro<->Claude convergence); the runtime and
+[owner requirements](OWNER-REQUIREMENTS.md) win on conflict.

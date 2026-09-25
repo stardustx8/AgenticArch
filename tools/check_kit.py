@@ -47,22 +47,22 @@ def main() -> int:
         case_states = json.loads((ROOT / 'schemas/case.schema.json').read_text())['properties']['status']['enum']
         if not {'WAIT_PERMISSION', 'WAIT_MANUAL_TRANSFER', 'WAIT_CAPABILITY'} <= set(case_states):
             raise ValueError('Case schema omits a required transport wait state')
-        for name in ('codex', 'pi'):
-            profile = json.loads((ROOT / f'harnesses/{name}/profile.json').read_text())
-            if (profile['harness'] != name or profile['billing'] != 'subscription_only' or
-                    profile['api_fallback'] is not False or
-                    profile['native_pi_claude_oauth'] is not False):
-                raise ValueError('Invalid harness billing/credential profile')
+        profile = json.loads((ROOT / 'harnesses/codex/profile.json').read_text())
+        if profile['billing'] != 'subscription_only' or profile['api_fallback'] is not False:
+            raise ValueError('Invalid Codex harness billing profile')
         for name in ('prepare-sol-pro-architecture-review', 'fable-adversarial-review'):
             base = ROOT / 'skills' / name
-            if (base / 'references/protocol.md').read_bytes() != (ROOT / 'docs/ESCALATION-PROTOCOL.md').read_bytes():
+            if (base / 'references/protocol.md').read_bytes() != (
+                    ROOT / 'skills/prepare-sol-pro-architecture-review/references/protocol.md').read_bytes():
                 raise ValueError('Portable skill protocol drift')
-            if (base / 'references/transport-gate.md').read_bytes() != (ROOT / 'docs/COMPUTER-USE-GATE.md').read_bytes():
-                raise ValueError('Portable skill transport gate drift')
+        from aa.workers import LANES
+        from aa.tasks import TIERS, CLM_TIERS, PEER_TEXT
+        if set(TIERS) != set(CLM_TIERS) or not set(PEER_TEXT) <= set(LANES):
+            raise ValueError('Runtime tiers/lanes inconsistent')
     except (ValueError, KeyError, OSError) as exc:
         errors.append(f'Policy/catalog/fixture: {exc}')
     for path in ROOT.rglob('*.md'):
-        if '.git' in path.parts:
+        if '.git' in path.parts or 'archive' in path.parts or 'parked' in path.parts:
             continue
         for target in re.findall(r'\[[^\]]*\]\(([^\s)]+)\)', path.read_text()):
             if target.startswith(('#', 'https://', 'http://', 'mailto:')):
@@ -72,17 +72,12 @@ def main() -> int:
                 errors.append(f'{path.relative_to(ROOT)}: missing link {target}')
     required = (
         'README.md', 'START-HERE.md', 'AGENTS.md', 'IMPLEMENTATION-STATUS.md',
-        'docs/SESSION-HANDOFF.md', 'docs/DECISIONS.md', 'docs/STATE-MACHINE.md',
-        'docs/OWNER-REQUIREMENTS.md', 'docs/CLM-ADAPTER.md', 'docs/HARNESS-DECISION.md',
-        'docs/MODEL-EVIDENCE.md', 'docs/DYNAMIC-REASONING.md', 'docs/SUBSCRIPTION-EVALUATION.md',
-        'docs/DECISION-PLANE.md', 'docs/DECISION-EVALUATION.md', 'docs/RESEARCH-SOURCES.md',
-        'docs/SEMANTIC-DECISION-OPPORTUNITIES.md', 'prompts/IMPLEMENT-AGENTICARCH.md',
-        'reference/core.py', 'reference/decision_plane.py', 'reference/clm.py',
-        'reference/routing.py', 'reference/effort.py', 'reference/quota.py',
-        'tests/test_core.py', 'tests/test_decision_plane.py', 'tests/test_revision.py',
-        'schemas/model-routing.schema.json', 'harnesses/codex/IMPLEMENT.md',
-        'harnesses/pi/IMPLEMENT.md', 'harnesses/pi/effort-adapter.ts',
-        'skills/prepare-sol-pro-architecture-review/SKILL.md',
+        'docs/RUNTIME.md', 'docs/ARCHITECTURE.md', 'docs/SESSION-HANDOFF.md', 'docs/DECISIONS.md',
+        'docs/OWNER-REQUIREMENTS.md', 'docs/CLM-ADAPTER.md', 'aa/daemon.py', 'aa/cases.py',
+        'aa/tasks.py', 'aa/workers.py', 'aa/clm.py', 'bin/aa', 'deploy/systemd/aa-daemon.service',
+        'deploy/systemd/aa-clm.service', 'deploy/systemd/aa-clm-embed.service',
+        'reference/core.py', 'reference/clm.py', 'reference/effort.py', 'tests/test_aa_runtime.py',
+        'skills/agenticarch/SKILL.md', 'skills/prepare-sol-pro-architecture-review/SKILL.md',
         'skills/fable-adversarial-review/SKILL.md')
     for name in required:
         if not (ROOT / name).is_file():
@@ -90,7 +85,7 @@ def main() -> int:
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         return 1
-    print('PASS: JSON, six lanes/eight routes, evidence references, nine operators, CLM fixture, both profiles, portable skills and local links')
+    print('PASS: policy/catalog JSON, operators, CLM fixture, Codex profile, runtime lanes/tiers, skills and local links')
     print('NOT CHECKED: live integrations, accuracy, quota savings, Git publication or full JSON Schema semantics')
     return 0
 
