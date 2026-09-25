@@ -790,7 +790,7 @@ class FailureTriageTests(unittest.TestCase):
         from aa.failure_triage import triage
         failed = ck.run({'c': command}, self.wt)[0]
         base = lambda cmd: ck.CheckRun('base', cmd, 0 if base_ok else 1, base_out)
-        return triage(failed, self.wt, base, FakeCLM(tier=decider_pick))
+        return triage(failed, self.wt, base, FakeCLM(peer=decider_pick))   # non-tier kinds use .peer
 
     def test_flaky_passes_on_rerun(self):
         (self.wt / 'flag').unlink(missing_ok=True)
