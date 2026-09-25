@@ -18,20 +18,28 @@ from .clm import CLM
 from .config import Config
 from .db import DB
 from .notify import Notifier
+from .semif import SemIf
 from .workers import Workers
+
+
+def make_decider(cfg: Config, db: DB):
+    """Local semantic decider selected by config `decider.backend` (semif | clm)."""
+    if cfg['decider']['backend'] == 'clm':
+        return CLM(cfg, db)
+    return SemIf(cfg, db)
 
 
 class App:
     def __init__(self, cfg: Config, db: DB | None = None, workers: Workers | None = None,
-                 clm: CLM | None = None, notifier: Notifier | None = None):
+                 decider=None, notifier: Notifier | None = None):
         self.cfg = cfg
         git.IDENTITY.update(cfg['git'])
         self.db = db or DB(cfg.db_path)
         self.n = notifier or Notifier(cfg, self.db)
-        self.clm = clm or CLM(cfg, self.db)
+        self.decider = decider or make_decider(cfg, self.db)
         self.workers = workers or Workers(cfg)
-        self.tasks = tasks.TaskFlow(cfg, self.db, self.workers, self.clm, self.n)
-        self.cases = cases.CaseFlow(cfg, self.db, self.workers, self.clm, self.n)
+        self.tasks = tasks.TaskFlow(cfg, self.db, self.workers, self.decider, self.n)
+        self.cases = cases.CaseFlow(cfg, self.db, self.workers, self.decider, self.n)
 
     # -------------------------------------------------------------- replies
     def handle_reply(self, line: str) -> None:

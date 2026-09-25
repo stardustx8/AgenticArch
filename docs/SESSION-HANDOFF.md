@@ -16,14 +16,16 @@ first case initializes it.
 
 ## Next steps
 
-1. First real deep case against a GitHub target repo (owner pastes the Pro prompts);
-   fix whatever the live Pro connector behaviour reveals (marker files, branch names).
-2. Install skills on the workstation (`~/.codex/skills`) and the Mac; verify the Codex
-   desktop app picks up `agenticarch`.
-3. Codex fork (openai/codex at the installed 0.155.x) with an Astra-Ares-style
-   pre-generation checkpoint calling CLM; used only by worker `codex exec`.
-4. After ~100 logged tasks: fine-tune the CLM head on `decisions` (owner picks = labels).
+1. Owner decision: triage policy — Codex alone, or Codex + SemIf with ask-on-disagreement
+   (~20% pings) or take-higher-if-1-apart (~6% pings). Data: eval/RESULTS.md.
+2. First real deep case against a GitHub target repo (owner pastes the Pro prompts).
+3. Install skills on the Mac (`tools/install_skills.py`).
+4. Re-run `tools/eval_decisions.py` on the owner's logged real tasks.
 5. Optional: `sudo loginctl enable-linger rosh` so units run without a login session.
+
+Decided 2026-09-25 (second session): SemIf replaces CLM (D016); no Codex fork, model-only
+switching (D015). SemIf model copied from the SHARED archive to
+`~/.local/share/agenticarch/semif/` (sha256 verified), served by `aa-semif`.
 
 ## Sandbox
 

@@ -10,9 +10,15 @@ public_url = "http://100.114.173.57:8093" # phone -> ntfy (tailnet); action butt
 topic = "agenticarch"
 reply_topic = "agenticarch-replies"
 
+[decider]
+backend = "semif"         # semif (default, see eval/results) | clm
+min_confidence = 0.2      # below this a vote is treated as an abstention
+
+[semif]
+socket = "~/.local/share/agenticarch/semif/run/semif.sock"
+
 [clm]
 url = "http://127.0.0.1:8700"
-min_confidence = 0.2      # below this a CLM vote is treated as an abstention
 
 [triage]
 model = "gpt-6-luna"

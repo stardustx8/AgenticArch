@@ -7,8 +7,8 @@ Operations manual for the working system (installed on the workstation 2026-09-2
 | Unit (systemd --user) | What | Where |
 | --- | --- | --- |
 | `aa-daemon` | Coordinator: tasks, deep cases, owner replies | `bin/aa daemon`, state in `~/.local/share/agenticarch/aa.sqlite` |
-| `aa-clm-embed` | CLM encoder: vLLM Qwen3-8B pooling, loopback :8090, ~24 GB VRAM | venv `~/.local/share/agenticarch/clm-venv` |
-| `aa-clm` | CLM System One API (`clm-serve`), loopback :8700, head `~/.cache/clm/CLM_v0.1-8B.pt` | same venv |
+| `aa-semif` | SemIf decider: Qwen3.5-4B in the `ai-lab/private-semif` container, `--network none`, Unix socket, ~9 GB VRAM | model + source in `~/.local/share/agenticarch/semif/` |
+| `aa-clm-embed`, `aa-clm` | CLM (vLLM Qwen3-8B + clm-serve), loopback; **disabled** since D016, re-enable with `decider.backend = "clm"` | venv `~/.local/share/agenticarch/clm-venv` |
 | `aa-ntfy-forward` | Exposes loopback ntfy on the Tailscale IP :8093 | `deploy/bin/tcp_forward.py` |
 | docker `ntfy` | Self-hosted ntfy (rootless Docker, 127.0.0.1:8093) | data in `~/.local/share/agenticarch/ntfy` |
 
@@ -19,10 +19,10 @@ Workers are the owner's subscription CLIs: `~/.local/bin/codex` (ChatGPT login) 
 
 ```text
 aa task "..."  (or the agenticarch skill in Codex desktop)
-  -> triage: Codex gpt-6-luna high (read-only, JSON) + CLM tier vote
+  -> triage: Codex gpt-6-luna high (read-only, JSON) + SemIf tier vote
        agree / one abstains -> tier;  disagree -> ntfy asks owner (buttons)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
-  -> routine: luna_low | bounded: luna_high | medium_tough: CLM picks astra_high/opus_medium/opus_high
+  -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
   -> pass: squash to one commit, push branch, ntfy "Done"
@@ -60,24 +60,23 @@ edit outside `cases/<id>/` or to the target snapshot is reverted and logged.
 - Reply grammar: `tier <task> <tier>`, `checks <task> ok|none`, `answer <case> <text>`,
   `resume <case>`, `cancel <id>`, `retry <task>`.
 
-## CLM: what it decides and how well
+## Local decider: what it decides and how well
 
-CLM votes on the tier, picks the medium-tough peer, and ranks files for the case
-BRIEF. Every call is logged in the `decisions` table with the final choice and later
-outcome, i.e. owner picks on disagreement become labels for fine-tuning.
+The decider (`decider.backend`: semif default, clm, rules) votes on the tier, picks the
+medium-tough model, and ranks files for the case BRIEF. Every call is logged in the
+`decisions` table with the final choice and later outcome; owner picks become labels.
+Wordings live in `aa/decisions.py` and are chosen by `tools/eval_decisions.py`.
 
-Zero-shot quality is limited. Measured 2026-09-25 on 8 hand-labelled tasks: option
-wording "short concrete answers" 5/8, tier names 2/8, seniority phrasing 2/8; it tends
-to collapse onto one class and missed both tough examples. Hence `clm.min_confidence`
-(0.2): below it a vote is an abstention, not a disagreement. Peer choice is close to
-uniform zero-shot (so the default `astra_high` usually wins). Plan: fine-tune the head on
-the logged decisions once ~100 labelled tasks exist (`contrastive-lm` fine-tuning).
+Benchmark (eval/RESULTS.md), tier accuracy on a blind holdout: Codex triage 90%, SemIf
+82%, keyword rules 57%, CLM 38%. Votes below `decider.min_confidence` (0.2) abstain.
+As a second voter next to Codex, no decider lowered total error cost; ask-on-disagreement
+pings the owner on ~20% of tasks with SemIf.
 
 ## Operations
 
 ```sh
 aa doctor                                   # health of everything
-systemctl --user status aa-daemon aa-clm aa-clm-embed aa-ntfy-forward
+systemctl --user status aa-daemon aa-semif aa-ntfy-forward
 journalctl --user -u aa-daemon -f
 ls ~/.local/share/agenticarch/logs          # one log per model job (full CLI output)
 sqlite3 ~/.local/share/agenticarch/aa.sqlite 'select * from events order by id desc limit 20'
@@ -92,7 +91,6 @@ Units start with the login session. For start at boot without login run once:
 
 ## Not yet done
 
-- Per-generation effort switching (Codex fork with an Astra-Ares-style checkpoint for
-  worker `codex exec`). Today effort is fixed per job by lane.
-- CLM fine-tuning on logged decisions.
+- Decide the triage policy (Codex alone vs Codex + SemIf; eval/RESULTS.md).
+- Re-run the benchmark on the owner's real tasks once enough are logged.
 - Mac: skills call `aa` via Tailscale SSH; the target repo must exist on the workstation.

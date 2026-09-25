@@ -91,7 +91,7 @@ class CLM:
                 choice = self._get_client().score(state, question, dict(options))
                 probs, proposed = choice.probabilities, choice.selected
             except Exception as exc:  # Any CLM failure => deterministic fallback.
-                self.db.event('clm_error', task_id, kind=kind, error=repr(exc)[:300])
+                self.db.event('clm_error', task_id, decision=kind, error=repr(exc)[:300])
                 self._client = None
         did = self.db.decision(kind, task_id, state, dict(options), probs, proposed, None)
         return proposed, probs, did
@@ -116,7 +116,7 @@ class CLM:
                     raise ValueError('rank response does not match candidates')
                 ranked = cands[:k]
             except Exception as exc:
-                self.db.event('clm_error', task_id, kind='context', error=repr(exc)[:300])
+                self.db.event('clm_error', task_id, decision='context', error=repr(exc)[:300])
         self.db.decision('context', task_id, context[:4000], {'candidates': candidates}, None,
                          None, json.dumps(ranked))
         return ranked

@@ -7,8 +7,8 @@
 - `aa` daemon (systemd user), SQLite state, CLI, ntfy push + reply buttons over Tailscale.
 - Subscription workers: `codex exec` gpt-6-luna (live task t0925-b68ad, 13 s) and `claude -p`
   claude-opus-5-5 medium (live task t0925-1186d, 21 s), both with checks passing.
-- Local CLM: vLLM Qwen3-8B encoder + clm-serve; tier votes, peer choice, context ranking
-  with exact-token preflight and deployment digest; decisions logged.
+- Local decider: SemIf (Qwen3.5-4B, no-network container, Unix socket) as default, CLM and
+  keyword rules selectable; benchmarked on 120 + 80 blind tasks (eval/RESULTS.md).
 - Triage with owner pick on disagreement (exercised live), checks from `.agenticarch.toml`.
 - `aa doctor`: both subscriptions, CLM, ntfy, private case-repo access all OK.
 
@@ -21,6 +21,6 @@
 
 ## Not implemented
 
-- Codex fork with per-generation effort checkpoint (effort is fixed per job today).
-- CLM fine-tuning on logged decisions (zero-shot accuracy is limited; see RUNTIME).
+- Triage policy decision pending (Codex alone vs Codex + SemIf); see eval/RESULTS.md.
+- Per-generation effort switching: dropped by the owner (D015).
 - Skill installation on the Mac (skills are in `skills/`; installer ready).

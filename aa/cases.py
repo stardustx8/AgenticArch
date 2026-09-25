@@ -19,7 +19,6 @@ from pathlib import Path
 
 from . import checks as checks_mod
 from . import git
-from .clm import CLM
 from .config import Config
 from .db import DB
 from .notify import Notifier
@@ -31,8 +30,8 @@ CHALLENGER_NAME = {'opus_high': 'opus', 'astra_high': 'astra'}
 
 
 class CaseFlow:
-    def __init__(self, cfg: Config, db: DB, workers: Workers, clm: CLM, notifier: Notifier):
-        self.cfg, self.db, self.workers, self.clm, self.n = cfg, db, workers, clm, notifier
+    def __init__(self, cfg: Config, db: DB, workers: Workers, decider, notifier: Notifier):
+        self.cfg, self.db, self.workers, self.decider, self.n = cfg, db, workers, decider, notifier
         self.slug = cfg['case_repo']['slug']
         self.deep = cfg['deep']
 
@@ -107,7 +106,7 @@ class CaseFlow:
             [p for p in tracked if any(w in p.lower() for w in words)]))[:60]
         if len(cands) <= 12:
             return cands
-        return self.clm.rank(t['id'], t['prompt'], 'Which file is most relevant to this task?', cands, 12)
+        return self.decider.rank(t['id'], t['prompt'], 'Which file is most relevant to this task?', cands, 12)
 
     def _request_pro(self, c: dict, template: str, *, first: bool = False, **extra: object) -> None:
         nn = c['pro_turn'] + 1

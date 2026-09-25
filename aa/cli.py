@@ -109,9 +109,13 @@ def doctor(cfg) -> int:
             line(f'{cli} subscription login', True)
         except BillingError as exc:
             line(f'{cli} subscription login', False, str(exc))
+    if cfg['decider']['backend'] == 'semif':
+        from .semif import SemIf
+        line('SemIf decider', SemIf(cfg, db).available(), cfg['semif']['socket'])
     clm = CLM(cfg, db)
-    line('CLM server', clm.available(), cfg['clm']['url'])
-    if clm.available():
+    if cfg['decider']['backend'] == 'clm':
+        line('CLM server', clm.available(), cfg['clm']['url'])
+    if cfg['decider']['backend'] == 'clm' and clm.available():
         try:
             line('CLM tokenizer', clm.count_tokens('hello world') > 0)
             line('CLM deployment digest', len(clm.deployment_digest()) == 64)

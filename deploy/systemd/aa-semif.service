@@ -1,0 +1,24 @@
+[Unit]
+Description=AgenticArch SemIf decider (Qwen3.5-4B, no network, Unix socket)
+After=docker.service
+
+[Service]
+ExecStartPre=/bin/mkdir -p %h/.local/share/agenticarch/semif/run %h/.local/share/agenticarch/semif/cache
+ExecStartPre=-/usr/bin/docker rm -f aa-semif
+ExecStart=/usr/bin/docker run --rm --name aa-semif --gpus all --network none --cap-drop ALL \
+  --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,nosuid,size=4g \
+  -e HOME=/tmp -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 -e PYTHONPATH=/opt/semif/src \
+  -e TRITON_CACHE_DIR=/cache/triton -e TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor \
+  -v %h/.local/share/agenticarch/semif/cache:/cache:rw \
+  -v %h/.local/share/agenticarch/semif/qwen3.5-4b:/models/qwen3.5-4b:ro \
+  -v %h/.local/share/agenticarch/semif/src:/opt/semif:ro \
+  -v %h/dev/AgenticArch/deploy/semif:/srv:ro \
+  -v %h/.local/share/agenticarch/semif/run:/run/semif:rw \
+  ai-lab/private-semif:2026-09-21 /srv/semif_server.py --socket /run/semif/semif.sock \
+  --model /models/qwen3.5-4b --revision local-Qwen3.5-4B
+ExecStop=/usr/bin/docker stop aa-semif
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=default.target

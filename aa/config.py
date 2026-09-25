@@ -26,6 +26,18 @@ DEFAULTS: dict[str, Any] = {
         'reply_topic': 'agenticarch-replies',
         'enabled': True,
     },
+    'decider': {
+        # Local semantic decider for tier/peer votes and context ranking. SemIf won the
+        # 2026-09-25 benchmark (86% vs 39% tier accuracy on the test split).
+        'backend': 'semif',
+        # Below this confidence (top minus mean of the rest) a vote is an abstention.
+        'min_confidence': 0.2,
+    },
+    'semif': {
+        'enabled': True,
+        'socket': '~/.local/share/agenticarch/semif/run/semif.sock',
+        'timeout_s': 30,
+    },
     'clm': {
         'enabled': True,
         'url': 'http://127.0.0.1:8700',
@@ -35,9 +47,6 @@ DEFAULTS: dict[str, Any] = {
         'max_tokens': 2048,
         'checkpoint': '~/.cache/clm/CLM_v0.1-8B.pt',
         'timeout_s': 30,
-        # Below this confidence a CLM answer counts as an abstention (zero-shot CLM is
-        # often near-uniform; see docs/RUNTIME.md).
-        'min_confidence': 0.2,
     },
     'workers': {
         'codex': '~/.local/bin/codex',

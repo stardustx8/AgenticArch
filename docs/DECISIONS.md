@@ -70,7 +70,17 @@ set, both tough examples missed). Votes below confidence 0.2 abstain; every deci
 logged with the final choice and outcome to enable fine-tuning. Owner resolves
 disagreements, which also produces labels.
 
-## D015: effort per job now, Codex fork later, amends D008
+## D015: models switch, effort does not; no Codex fork, supersedes D008
 
-Effort is fixed per lane per job. Per-generation switching needs a Codex fork used only
-for headless workers (owner decision); scheduled as the next milestone.
+Owner, 2026-09-25: with menus of Luna low/high and Astra high only, per-generation effort
+switching would only ever affect Luna, whose effort the tier already fixes. Routing
+switches models only. Medium-tough peers are Astra high and Opus 5.5 high.
+
+## D016: SemIf replaces CLM as local decider, supersedes D014
+
+Benchmark (eval/RESULTS.md): tier accuracy on a blind holdout — Codex triage 90%, SemIf
+82%, keyword rules 57%, CLM zero-shot 38%. SemIf (Qwen3.5-4B typed option logits, in a
+--network none container on a Unix socket) is the default decider; CLM services are
+stopped but selectable (`decider.backend`). Rules are kept as a zero-cost backend and
+benchmark baseline. Finding: as a second voter next to Codex triage, no decider lowered
+total error cost; the owner decides whether to keep ask-on-disagreement.

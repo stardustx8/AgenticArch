@@ -251,10 +251,22 @@ class LocalFlowTests(unittest.TestCase):
 
     def test_medium_tough_uses_clm_peer_choice(self):
         self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': write_done},
-                       FakeCLM('medium_tough', peer='opus_high'))
+                       FakeCLM('medium_tough', peer='opus'))
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['lane'], 'opus_high')
+
+    def test_medium_peer_escalates_to_other_model_then_deep(self):
+        fail = lambda lane, cwd, prompt, extra: Result(True, 'tried', None, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': fail},
+                       FakeCLM('medium_tough', peer='astra'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        lanes = [c[0] for c in self.env.workers.calls if not c[1].endswith('-triage')]
+        self.assertEqual(lanes[:4], ['astra_high', 'astra_high', 'opus_high', 'opus_high'])
+        self.assertNotIn('opus_medium', lanes, 'peer choice switches models only, not effort')
+        self.assertEqual(t['status'], 'DEEP')
 
     def test_billing_error_blocks_without_dispatch(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'billing_error': True},
@@ -444,6 +456,84 @@ class DeepFlowTests(unittest.TestCase):
         self.assertEqual((c['phase'], c['pro_turn']), ('WAIT_PRO', 3))
         turn3 = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/PRO-TURN-03.md')
         self.assertIn('Post-GO verification failed', turn3)
+
+
+class SemIfClientTests(unittest.TestCase):
+    """aa.semif.SemIf against a real Unix-socket HTTP server speaking the server protocol."""
+
+    def setUp(self):
+        import socketserver
+        import threading
+        from http.server import BaseHTTPRequestHandler
+        self._tmp = tempfile.TemporaryDirectory()
+        self.sock = str(Path(self._tmp.name) / 's.sock')
+        self.reply = None
+
+        test = self
+
+        class H(BaseHTTPRequestHandler):
+            def address_string(self):
+                return 'unix'
+
+            def log_message(self, *a):
+                pass
+
+            def _send(self, body):
+                data = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                self._send({'ok': True, 'model': {}})
+
+            def do_POST(self):
+                req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                ids = [o['id'] for o in req['options']]
+                self._send(test.reply(ids) if test.reply else
+                           {'option_ids': ids, 'probabilities': [0.7] + [0.3 / (len(ids) - 1)] * (len(ids) - 1)})
+
+        class S(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+            daemon_threads = True
+
+        self.server = S(self.sock, H)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        from aa.semif import SemIf
+        cfg = config.load(Path('/nonexistent'), {'semif': {'socket': self.sock}})
+        self.db = DB(':memory:')
+        self.semif = SemIf(cfg, self.db)
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self._tmp.cleanup()
+
+    def test_choose_logs_decision_with_probabilities(self):
+        pick, probs, did = self.semif.choose('tier', 't1', 'state', 'q?', {'a': 'A', 'b': 'B'})
+        self.assertEqual(pick, 'a')
+        self.assertAlmostEqual(sum(probs.values()), 1.0)
+        row = self.db.q('SELECT * FROM decisions WHERE id=?', (did,))[0]
+        self.assertEqual((row['kind'], row['proposed']), ('tier', 'a'))
+
+    def test_mismatched_options_are_rejected_as_no_vote(self):
+        self.reply = lambda ids: {'option_ids': ['zzz'] + ids[1:], 'probabilities': [0.5, 0.5]}
+        pick, probs, _ = self.semif.choose('tier', 't1', 'state', 'q?', {'a': 'A', 'b': 'B'})
+        self.assertEqual((pick, probs), (None, None))
+        kinds = [r['kind'] for r in self.db.q('SELECT kind FROM events')]
+        self.assertIn('decider_error', kinds)
+
+    def test_missing_socket_means_unavailable(self):
+        from aa.semif import SemIf
+        cfg = config.load(Path('/nonexistent'), {'semif': {'socket': '/nonexistent/s.sock'}})
+        s = SemIf(cfg, self.db)
+        self.assertFalse(s.available())
+        self.assertEqual(s.choose('peer', None, 'x', 'q', {'a': 'A', 'b': 'B'})[0], None)
+
+    def test_rank_orders_by_relevance(self):
+        self.reply = lambda ids: {'option_ids': ids, 'probabilities': [0.9, 0.1]}
+        ranked = self.semif.rank('t1', 'task', 'relevant?', ['a.py', 'b.py'], 1)
+        self.assertEqual(len(ranked), 1)
 
 
 class WorkerTests(unittest.TestCase):

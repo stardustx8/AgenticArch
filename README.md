@@ -1,7 +1,7 @@
 # AgenticArch
 
 A working coding coordinator for one workstation: tasks are triaged by Codex and a local
-contrastive model (CLM), executed by subscription workers (GPT-6 Luna/Astra via Codex,
+semantic decider (SemIf), executed by subscription workers (GPT-6 Luna/Astra via Codex,
 Claude Opus 5.5 via Claude Code), verified by the coordinator's own check runs, and tough
 problems go to GPT-6 Pro in ChatGPT web with Opus x Astra adversarial challenge rounds.
 
@@ -36,13 +36,16 @@ ln -sf $PWD/bin/aa ~/.local/bin/aa
 cp config/aa.example.toml ~/.config/agenticarch/aa.toml
 for u in deploy/systemd/*.service; do ln -sf $PWD/$u ~/.config/systemd/user/; done
 systemctl --user daemon-reload
-systemctl --user enable --now aa-ntfy-forward aa-clm-embed aa-clm aa-daemon
+systemctl --user enable --now aa-ntfy-forward aa-semif aa-daemon
 aa doctor
 ```
 
 Prerequisites (see RUNTIME): Codex CLI with ChatGPT login, Claude Code CLI with Claude
-Max login, the CLM venv (`uv venv --python 3.12`; `uv pip install vllm contrastive-lm`;
-`clm-download`), ntfy in Docker, SSH access to GitHub.
+Max login, the SemIf container image `ai-lab/private-semif` with Qwen3.5-4B in
+`~/.local/share/agenticarch/semif/`, ntfy in Docker, SSH access to GitHub.
+
+Decider benchmark: `python3 tools/eval_decisions.py --backends semif,rules` (see
+[eval/RESULTS.md](eval/RESULTS.md)).
 
 ## Tests
 

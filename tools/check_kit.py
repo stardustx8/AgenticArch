@@ -56,8 +56,11 @@ def main() -> int:
                     ROOT / 'skills/prepare-sol-pro-architecture-review/references/protocol.md').read_bytes():
                 raise ValueError('Portable skill protocol drift')
         from aa.workers import LANES
-        from aa.tasks import TIERS, CLM_TIERS, PEER_TEXT
-        if set(TIERS) != set(CLM_TIERS) or not set(PEER_TEXT) <= set(LANES):
+        from aa.tasks import TIERS
+        from aa.decisions import CHOSEN, PEER_LANES, peer_question, tier_question
+        if (any(set(tier_question(b)[1]) != set(TIERS) for b in CHOSEN) or
+                not set(PEER_LANES.values()) <= set(LANES) or
+                any(set(peer_question(b)[1]) != set(PEER_LANES) for b in CHOSEN)):
             raise ValueError('Runtime tiers/lanes inconsistent')
     except (ValueError, KeyError, OSError) as exc:
         errors.append(f'Policy/catalog/fixture: {exc}')
@@ -73,9 +76,9 @@ def main() -> int:
     required = (
         'README.md', 'START-HERE.md', 'AGENTS.md', 'IMPLEMENTATION-STATUS.md',
         'docs/RUNTIME.md', 'docs/ARCHITECTURE.md', 'docs/SESSION-HANDOFF.md', 'docs/DECISIONS.md',
-        'docs/OWNER-REQUIREMENTS.md', 'docs/CLM-ADAPTER.md', 'aa/daemon.py', 'aa/cases.py',
+        'docs/OWNER-REQUIREMENTS.md', 'eval/RESULTS.md', 'aa/daemon.py', 'aa/cases.py',
         'aa/tasks.py', 'aa/workers.py', 'aa/clm.py', 'bin/aa', 'deploy/systemd/aa-daemon.service',
-        'deploy/systemd/aa-clm.service', 'deploy/systemd/aa-clm-embed.service',
+        'deploy/systemd/aa-semif.service', 'deploy/semif/semif_server.py', 'aa/semif.py', 'aa/rules.py',
         'reference/core.py', 'reference/clm.py', 'reference/effort.py', 'tests/test_aa_runtime.py',
         'skills/agenticarch/SKILL.md', 'skills/prepare-sol-pro-architecture-review/SKILL.md',
         'skills/fable-adversarial-review/SKILL.md')

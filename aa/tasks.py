@@ -13,10 +13,10 @@ from pathlib import Path
 
 from . import checks as checks_mod
 from . import git
-from .clm import CLM
 from .config import Config
 from .db import DB
 from .notify import Notifier
+from .decisions import PEER_LANES, peer_question, tier_question
 from .workers import LANES, BillingError, Workers
 
 PROMPTS = Path(__file__).parent / 'prompts'
@@ -33,27 +33,10 @@ TIERS = {
              'migration design, irreversible changes, or a problem whose approach is unclear.',
 }
 TIER_ORDER = list(TIERS)
-# CLM option texts: short concrete answer phrasings scored best zero-shot (5/8 on the
-# probe set vs 2/8 for tier-name or seniority phrasings); see docs/RUNTIME.md.
-CLM_TIERS = {
-    'routine': 'A trivial edit: rename, typo, config value or one-line change.',
-    'bounded': 'A normal bug fix or small feature in a few files.',
-    'medium_tough': 'A hard bug or complex change spanning several interacting modules.',
-    'tough': 'A new architecture, system design, research or migration plan.',
-}
-CLM_TIER_QUESTION = 'How difficult is this coding task?'
 PRO_CATEGORIES = {'architecture', 'research', 'security_design', 'migration_design',
                   'irreversible_change_design'}
 TIER_LANE = {'routine': 'luna_low', 'bounded': 'luna_high'}
-MEDIUM_PEERS = ('astra_high', 'opus_medium', 'opus_high')
-PEER_TEXT = {
-    'astra_high': 'GPT-6 Astra at high reasoning: strong at backend logic, systems code, '
-                  'algorithms, debugging and precise multi-file refactors.',
-    'opus_medium': 'Claude Opus 5.5 at medium effort: fast, careful implementation of '
-                   'well-specified frontend, UI, product and documentation work.',
-    'opus_high': 'Claude Opus 5.5 at high effort: deep reasoning for intricate frontend, visual, '
-                 'creative or cross-cutting changes that need careful judgement.',
-}
+MEDIUM_PEERS = tuple(PEER_LANES.values())      # model-only choice: astra_high | opus_high
 
 TRIAGE_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -81,8 +64,9 @@ def bullet(items: list[str] | None, empty: str = '- (none given)') -> str:
 
 
 class TaskFlow:
-    def __init__(self, cfg: Config, db: DB, workers: Workers, clm: CLM, notifier: Notifier):
-        self.cfg, self.db, self.workers, self.clm, self.n = cfg, db, workers, clm, notifier
+    def __init__(self, cfg: Config, db: DB, workers: Workers, decider, notifier: Notifier):
+        # decider: aa.semif.SemIf (default) or aa.clm.CLM — same choose/rank interface.
+        self.cfg, self.db, self.workers, self.decider, self.n = cfg, db, workers, decider, notifier
 
     # ------------------------------------------------------------------ intake
     def create(self, repo: Path, prompt: str, tier: str | None = None) -> str:
@@ -119,12 +103,12 @@ class TaskFlow:
         if triage.get('pro_categories'):
             codex_tier = 'tough'
 
-        clm_tier, probs, did = self.clm.choose('tier', t['id'], t['prompt'], CLM_TIER_QUESTION,
-                                               CLM_TIERS)
+        question, options = tier_question(self._backend())
+        clm_tier, probs, did = self.decider.choose('tier', t['id'], t['prompt'], question, options)
         if not self._confident(probs):
             clm_tier = None            # Near-uniform scores are an abstention, not a vote.
-        data['tier_votes'] = {'codex': codex_tier, 'clm': clm_tier, 'clm_probs': probs,
-                              'decision_id': did}
+        data['tier_votes'] = {'codex': codex_tier, 'decider': clm_tier, 'backend': self._backend(),
+                              'probs': probs, 'decision_id': did}
 
         if t['tier']:                      # Owner fixed the tier at intake.
             final, source = t['tier'], 'owner'
@@ -148,7 +132,7 @@ class TaskFlow:
         if len(opts) < 3 and higher:
             opts.append(higher[0])
         self.n.send(f'Tier? {t["id"]}',
-                    f'{t["prompt"][:300]}\n\nCodex: {codex_tier}  CLM: {clm_tier}\n{summary[:500]}\n'
+                    f'{t["prompt"][:300]}\n\nCodex: {codex_tier}  {self._backend()}: {clm_tier}\n{summary[:500]}\n'
                     f'Or on the workstation: aa answer "tier {t["id"]} <tier>"',
                     choices=[(o, f'tier {t["id"]} {o}') for o in opts[:3]], priority=4, tags='question')
 
@@ -171,29 +155,31 @@ class TaskFlow:
         lane = TIER_LANE.get(t['tier']) or self._choose_peer(t, exclude=())
         self._start_lane(t, lane)
 
+    def _backend(self) -> str:
+        return getattr(self.decider, 'backend', 'clm')
+
     def _choose_peer(self, t: dict, exclude: tuple[str, ...]) -> str | None:
-        options = {k: v for k, v in PEER_TEXT.items() if k not in exclude}
+        """Pick the medium-tough MODEL (Astra or Opus); effort per model is fixed."""
+        question, texts = peer_question(self._backend())
+        options = {k: v for k, v in texts.items() if PEER_LANES[k] not in exclude}
         if not options:
             return None
         if len(options) == 1:
-            return next(iter(options))
-        tri = t['data'].get('triage') or {}
-        state = f'Coding task:\n{t["prompt"]}\n\nTriage: {tri.get("summary", "")}'
-        pick, probs, did = self.clm.choose('peer', t['id'], state,
-                                           'Which implementation worker fits this task best?', options)
+            return PEER_LANES[next(iter(options))]
+        pick, probs, did = self.decider.choose('peer', t['id'], t['prompt'], question, options)
         if not self._confident(probs):
             pick = None
-        final = pick if pick in options else next(iter(options))   # astra_high first by default
+        final = pick if pick in options else 'astra'      # deterministic default
         self.db.decision_final(did, final)
-        return final
+        return PEER_LANES[final]
 
     def _confident(self, probs: dict | None) -> bool:
-        """CLM confidence (top minus mean of the rest) must reach clm.min_confidence."""
+        """Decider confidence (top minus mean of the rest) must reach decider.min_confidence."""
         if not probs:
             return False
         vals = sorted(probs.values(), reverse=True)
         conf = vals[0] - sum(vals[1:]) / max(1, len(vals) - 1)
-        return conf >= float(self.cfg['clm'].get('min_confidence', 0.2))
+        return conf >= float(self.cfg['decider'].get('min_confidence', 0.2))
 
     def _start_lane(self, t: dict, lane: str | None) -> None:
         if lane is None:
@@ -319,8 +305,8 @@ class TaskFlow:
         elif t['lane'] == 'luna_high':
             nxt = self._choose_peer(t, exclude=tried)
         else:
-            # Prefer an untried high-effort peer before giving up on local implementation.
-            nxt = next((p for p in ('opus_high', 'astra_high') if p not in tried), None)
+            # Try the other medium-tough model before giving up on local implementation.
+            nxt = next((p for p in MEDIUM_PEERS if p not in tried), None)
         self.db.event('escalate', t['id'], frm=t['lane'], to=nxt)
         self._start_lane(t, nxt)
 
