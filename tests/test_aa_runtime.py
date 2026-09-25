@@ -773,3 +773,35 @@ class WorkerTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FailureTriageTests(unittest.TestCase):
+    """aa/failure_triage.py prototype: deterministic rerun/base steps, decider only for env-vs-code."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wt = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, command, base_ok=True, base_out='', decider_pick='code'):
+        from aa import checks as ck
+        from aa.failure_triage import triage
+        failed = ck.run({'c': command}, self.wt)[0]
+        base = lambda cmd: ck.CheckRun('base', cmd, 0 if base_ok else 1, base_out)
+        return triage(failed, self.wt, base, FakeCLM(tier=decider_pick))
+
+    def test_flaky_passes_on_rerun(self):
+        (self.wt / 'flag').unlink(missing_ok=True)
+        v = self._run('test -f flag || { touch flag; exit 1; }')
+        self.assertEqual(v.action, 'FLAKY')
+
+    def test_pre_existing_failure_on_base(self):
+        v = self._run('echo "Error: legacy broken"; exit 1', base_ok=False, base_out='Error: legacy broken\n')
+        self.assertEqual(v.action, 'PRE_EXISTING')
+
+    def test_environment_needs_confident_decider(self):
+        self.assertEqual(self._run('echo "connection refused"; exit 1', decider_pick='environment').action,
+                         'ENVIRONMENT')
+        self.assertEqual(self._run('echo "AssertionError"; exit 1', decider_pick='code').action, 'CODE')
