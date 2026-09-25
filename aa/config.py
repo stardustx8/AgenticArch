@@ -58,6 +58,10 @@ DEFAULTS: dict[str, Any] = {
         # Codex model that proposes the tier (read-only inspection of the repo).
         'model': 'gpt-6-luna',
         'effort': 'high',
+        # codex: Codex triage decides, local decider = shadow vote + fallback (benchmark best);
+        # higher_if_1: take the higher vote if 1 tier apart, ask owner on bigger gaps;
+        # ask_on_disagreement: ask owner whenever Codex and the decider differ.
+        'policy': 'codex',
     },
     'retry': {
         'max_passes_per_lane': 2,

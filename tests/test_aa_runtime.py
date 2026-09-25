@@ -70,6 +70,8 @@ class FakeWorkers(Workers):
         self.verify_billing(lane.cli)
         self.calls.append((lane.name, log_name))
         if log_name.endswith('-triage'):
+            if self.script['triage'] is None:
+                return Result(False, '', None, [], error='triage timeout')
             return Result(True, '', self.script['triage'], [lane.model])
         fn = self.script[_kind(log_name)]
         return fn(lane, Path(cwd), prompt, extra_dirs)
@@ -82,13 +84,13 @@ def _kind(log_name: str) -> str:
     return 'work'
 
 
-def triage(tier, cats=()):
-    return {'tier': tier, 'pro_categories': list(cats), 'summary': 's', 'acceptance_criteria': ['a'],
-            'relevant_paths': ['app.py'], 'risks': []}
+def triage(tier, cats=(), peer='astra'):
+    return {'tier': tier, 'peer': peer, 'pro_categories': list(cats), 'summary': 's',
+            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': []}
 
 
 class Env:
-    def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt'):
+    def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex'):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -106,6 +108,7 @@ class Env:
             'case_repo': {'url': str(self.case_origin), 'slug': 'me/cases'},
             'ntfy': {'enabled': False},
             'delivery': {'push_branch': True},
+            'triage': {'policy': policy},
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -212,8 +215,42 @@ class LocalFlowTests(unittest.TestCase):
         self.assertEqual(sh(self.env.target, 'git', 'rev-list', '--count', f'{base}..aa/{tid}'), '1')
         self.assertEqual(sh(self.env.target, 'git', 'diff', '--name-only', f'{base}..aa/{tid}'), 'done.txt')
 
-    def test_disagreement_asks_owner_then_uses_pick(self):
+    def test_codex_policy_uses_codex_tier_and_logs_decider_vote(self):
         self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('tough'))
+        tid = self.env.app.tasks.create(self.env.target, 'fix bug')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['tier'], t['tier_source']), ('DONE', 'bounded', 'codex'))
+        self.assertEqual(t['data']['tier_votes']['decider'], 'tough')     # shadow vote kept
+
+    def test_decider_is_fallback_when_codex_triage_fails(self):
+        self.env = Env(self.tmp, {'triage': None, 'work': write_done}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['tier'], t['tier_source']), ('DONE', 'routine', 'decider'))
+
+    def test_higher_if_1_takes_higher_vote_and_asks_on_big_gap(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('medium_tough'),
+                       policy='higher_if_1')
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['tier'], 'medium_tough')
+        self.env.app.tasks.decider = FakeCLM('tough')
+        tid2 = self.env.app.tasks.create(self.env.target, 'y')
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid2)['status'], 'WAIT_OWNER')
+
+    def test_codex_policy_uses_codex_peer(self):
+        self.env = Env(self.tmp, {'triage': triage('medium_tough', peer='opus'), 'work': write_done},
+                       FakeCLM('medium_tough', peer='astra'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['lane'], 'opus_high')
+
+    def test_disagreement_asks_owner_then_uses_pick(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('tough'),
+                       policy='ask_on_disagreement')
         tid = self.env.app.tasks.create(self.env.target, 'fix bug')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['status'], 'WAIT_OWNER')
@@ -227,7 +264,7 @@ class LocalFlowTests(unittest.TestCase):
 
     def test_low_confidence_clm_is_an_abstention(self):
         self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done},
-                       FakeCLM('tough', probs_conf=0.3))
+                       FakeCLM('tough', probs_conf=0.3), policy='ask_on_disagreement')
         tid = self.env.app.tasks.create(self.env.target, 'fix bug')
         self.env.run()
         t = self.env.db.task(tid)
@@ -249,9 +286,9 @@ class LocalFlowTests(unittest.TestCase):
         self.assertEqual([a[0] for a in attempts], ['luna_low', 'luna_low', 'luna_high'])
         self.assertTrue(attempts[1][1], 'retry prompt must include the failing checks')
 
-    def test_medium_tough_uses_clm_peer_choice(self):
+    def test_medium_tough_uses_decider_peer_choice(self):
         self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': write_done},
-                       FakeCLM('medium_tough', peer='opus'))
+                       FakeCLM('medium_tough', peer='opus'), policy='ask_on_disagreement')
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['lane'], 'opus_high')

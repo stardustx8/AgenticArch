@@ -40,9 +40,10 @@ MEDIUM_PEERS = tuple(PEER_LANES.values())      # model-only choice: astra_high |
 
 TRIAGE_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['tier', 'pro_categories', 'summary', 'acceptance_criteria', 'relevant_paths', 'risks'],
+    'required': ['tier', 'peer', 'pro_categories', 'summary', 'acceptance_criteria', 'relevant_paths', 'risks'],
     'properties': {
         'tier': {'type': 'string', 'enum': TIER_ORDER},
+        'peer': {'type': 'string', 'enum': sorted(PEER_LANES)},
         'pro_categories': {'type': 'array', 'items': {'type': 'string', 'enum': sorted(PRO_CATEGORIES)}},
         'summary': {'type': 'string'},
         'acceptance_criteria': {'type': 'array', 'items': {'type': 'string'}},
@@ -110,18 +111,26 @@ class TaskFlow:
         data['tier_votes'] = {'codex': codex_tier, 'decider': clm_tier, 'backend': self._backend(),
                               'probs': probs, 'decision_id': did}
 
+        policy = self.cfg['triage'].get('policy', 'codex')
         if t['tier']:                      # Owner fixed the tier at intake.
             final, source = t['tier'], 'owner'
-        elif codex_tier and clm_tier and codex_tier != clm_tier:
+        elif not codex_tier and not clm_tier:
+            self.db.update_task(t['id'], data=data, status='WAIT_OWNER')
+            self._ask_tier(t, None, None, 'Triage failed on both Codex and the local decider.')
+            return
+        elif not codex_tier or not clm_tier or codex_tier == clm_tier:
+            final = codex_tier or clm_tier
+            source = 'agree' if codex_tier == clm_tier else ('codex' if codex_tier else 'decider')
+        elif policy == 'codex':
+            # Benchmark: Codex alone had the lowest error cost; the decider vote is kept
+            # in the log (shadow) and used only when Codex triage fails.
+            final, source = codex_tier, 'codex'
+        elif policy == 'higher_if_1' and abs(TIER_ORDER.index(codex_tier) - TIER_ORDER.index(clm_tier)) == 1:
+            final = max(codex_tier, clm_tier, key=TIER_ORDER.index)
+            source = 'higher_vote'
+        else:                              # ask_on_disagreement, or higher_if_1 with a 2+ gap
             self.db.update_task(t['id'], data=data, status='WAIT_OWNER')
             self._ask_tier(t, codex_tier, clm_tier, triage.get('summary', ''))
-            return
-        elif codex_tier or clm_tier:
-            final = codex_tier or clm_tier
-            source = 'agree' if codex_tier == clm_tier else ('codex' if codex_tier else 'clm')
-        else:
-            self.db.update_task(t['id'], data=data, status='WAIT_OWNER')
-            self._ask_tier(t, None, None, 'Triage failed on both Codex and CLM.')
             return
         self.db.decision_final(did, final)
         self.db.update_task(t['id'], tier=final, tier_source=source, data=data, status='TRIAGED')
@@ -169,6 +178,9 @@ class TaskFlow:
         pick, probs, did = self.decider.choose('peer', t['id'], t['prompt'], question, options)
         if not self._confident(probs):
             pick = None
+        codex_peer = (t['data'].get('triage') or {}).get('peer')
+        if self.cfg['triage'].get('policy', 'codex') == 'codex' and codex_peer in options:
+            pick = codex_peer                              # decider vote stays logged (shadow)
         final = pick if pick in options else 'astra'      # deterministic default
         self.db.decision_final(did, final)
         return PEER_LANES[final]

@@ -23,6 +23,7 @@ url = "http://127.0.0.1:8700"
 [triage]
 model = "gpt-6-luna"
 effort = "high"
+policy = "codex"          # codex | higher_if_1 | ask_on_disagreement (see eval/RESULTS.md)
 
 [deep]
 challenge_rounds = 5

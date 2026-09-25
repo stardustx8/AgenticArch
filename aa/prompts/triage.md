@@ -14,6 +14,8 @@ Tiers (pick the lowest tier that can do the task well):
 - medium_tough: $tier_medium_tough
 - tough: $tier_tough
 
+peer: the better model if this were medium-tough work: astra (backend, systems,
+algorithms, data, infrastructure, debugging) or opus (frontend, UI/UX, visual, product, writing).
 pro_categories: list any that apply among architecture, research, security_design,
 migration_design, irreversible_change_design (any entry forces the tough tier).
 acceptance_criteria: concrete, checkable statements of done.
