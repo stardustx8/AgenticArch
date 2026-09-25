@@ -26,6 +26,7 @@ a day); manual one-line Pro prompts are acceptable.
 | O13 | Remote execution subscription-only (ChatGPT Pro, Claude Max); never API credits or paid overflow. | aa/workers.py |
 | O14 | Amended 2026-09-25: no per-generation effort switching and no Codex fork. Routing switches models only; effort is fixed per lane (medium-tough peers: Astra high or Opus high). | aa/decisions.py PEER_LANES |
 | O15 | Skills installed on the workstation and the Mac. | skills/, tools/install_skills.py |
+| O17 | After the checks pass, Opus 5.5 checks the implementation against every acceptance criterion; mismatches go back to the worker, max 3 loops, then the owner. | aa/tasks.py `_spec_check` |
 | O16 | Git: branch + PR per milestone; SSH auth. Moderate cleanup: compat layers removed, Pi parked, docs trimmed. | this revision |
 
 ## Environment (verified 2026-09-25)

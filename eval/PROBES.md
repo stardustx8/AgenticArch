@@ -11,7 +11,7 @@ runs (secret_leak is author-written and generated locally, gitignored). Full tab
 | Check failure: environment vs code | env recall 100%, precision 83% at conf>=0.5 | 60% overall | 87% overall, 4.5 s + quota per failure | **Use SemIf** + deterministic rerun (flaky) and base-commit run (pre-existing) |
 | Worker outcome done/partial/blocked | 93% | 51% | 98% | Prefer structured status from the worker itself (schema field, no extra call) |
 | Test tampering (checks passed dishonestly) | 78%, tampered recall 55% | 60% | 100% | **Use Codex review**, SemIf too weak (small judges near chance, CodeJudgeBench) |
-| Spec conformance after each run (owner idea; blind, n=40) | whole spec 65% (catches 30%); per criterion 80% (catches 70%, 10% false send-backs) | always "matches" 50% | **90%, catches 100%, 20% false send-backs** | **Use Codex as judge**; SemIf pre-screen saves only 2/40 calls when tuned honestly on dev |
+| Spec conformance after each run (owner idea; blind, n=40) | whole spec 65% (catches 30%); per criterion 80% (catches 70%, 10% false send-backs) | always "matches" 50% | **90%, catches 100%, 20% false send-backs** | Opus 5.5 medium/high: **100%, 0 false send-backs** → **built with Opus medium (D017)**; SemIf pre-screen saves only 2/40 calls |
 | Command risk guard | — | — | — | Use Claude Code's native sandbox + auto mode (needs socat) |
 | Task tier / peer routing | 82% (holdout) | 57% | Codex triage 90% (already runs) | Codex alone (RESULTS.md) |
 

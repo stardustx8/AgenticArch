@@ -52,7 +52,20 @@ TRIAGE_SCHEMA = {
     },
 }
 
-ACTIVE = ('NEW', 'TRIAGED', 'READY', 'VERIFY')
+ACTIVE = ('NEW', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
+
+SPEC_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['criteria', 'tampering', 'tampering_reason'],
+    'properties': {
+        'criteria': {'type': 'array', 'items': {
+            'type': 'object', 'additionalProperties': False, 'required': ['criterion', 'met', 'reason'],
+            'properties': {'criterion': {'type': 'string'}, 'met': {'type': 'boolean'},
+                           'reason': {'type': 'string'}}}},
+        'tampering': {'type': 'boolean'},
+        'tampering_reason': {'type': 'string'},
+    },
+}
 
 
 def render(name: str, **values: object) -> str:
@@ -80,7 +93,8 @@ class TaskFlow:
 
     def step(self, t: dict) -> None:
         handler = {'NEW': self._triage, 'TRIAGED': self._route, 'READY': self._work,
-                   'VERIFY': self._verify}.get(t['status'])
+                   'VERIFY': self._verify, 'SPEC': self._spec_check,
+                   'DELIVER': self._deliver}.get(t['status'])
         if handler:
             handler(t)
 
@@ -90,9 +104,14 @@ class TaskFlow:
         data = t['data']
         prompt = render('triage.md', repo=repo, prompt=t['prompt'],
                         **{f'tier_{k}': v for k, v in TIERS.items()})
-        res = self.workers.execute(LANES['luna_high'] if self.cfg['triage']['effort'] == 'high'
-                                   else LANES['luna_low'], prompt, repo, write=False,
-                                   schema=TRIAGE_SCHEMA, log_name=f'{t["id"]}-triage')
+        try:
+            res = self.workers.execute(LANES['luna_high'] if self.cfg['triage']['effort'] == 'high'
+                                       else LANES['luna_low'], prompt, repo, write=False,
+                                       schema=TRIAGE_SCHEMA, log_name=f'{t["id"]}-triage')
+        except BillingError as exc:              # triage falls back to the local decider
+            from .workers import Result
+            res = Result(False, '', error=f'billing: {exc}')
+            self.n.send('Codex login problem', str(exc), tags='warning')
         if not res.ok or not res.structured:
             self.db.event('triage_failed', t['id'], error=res.error[:500])
             triage = {'tier': None, 'pro_categories': [], 'summary': '', 'acceptance_criteria': [],
@@ -255,8 +274,8 @@ class TaskFlow:
         wt = self._worktree(t)
         tri = t['data'].get('triage') or {}
         prev = t['data'].get('last_failure')
-        previous = (f'\nA previous attempt left the worktree as it is now but these checks failed '
-                    f'(fix them; keep what works):\n{prev}\n') if prev else ''
+        previous = (f'\nA previous attempt left the worktree as it is now. Feedback on it '
+                    f'(address it; keep what works):\n{prev}\n') if prev else ''
         prompt = render('worker.md', worktree=wt, branch=t['branch'] or f'aa/{t["id"]}',
                         prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
                         paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
@@ -269,11 +288,17 @@ class TaskFlow:
             self.db.update_task(t['id'], status='BLOCKED', result=f'billing: {exc}')
             self.n.send(f'Blocked {t["id"]}', f'Subscription check failed: {exc}', tags='warning')
             return
-        passes, lane_passes = t['passes'] + 1, t['lane_passes'] + 1
+        spec_rerun = t['data'].pop('spec_rerun', False)       # spec loops have their own budget
+        passes = t['passes'] + (0 if spec_rerun else 1)
+        lane_passes = t['lane_passes'] + (0 if spec_rerun else 1)
         t['data'].setdefault('attempts', []).append(
             {'lane': lane.name, 'ok': res.ok, 'seconds': round(res.seconds), 'usage': res.usage,
              'error': res.error[:500], 'summary': res.text[-1500:]})
         self.db.update_task(t['id'], passes=passes, lane_passes=lane_passes, data=t['data'])
+        rebuttals = [ln for ln in res.text.splitlines() if ln.strip().startswith('REBUTTAL:')]
+        if rebuttals:
+            t['data']['rebuttals'] = rebuttals[:10]
+            self.db.update_task(t['id'], data=t['data'])
         blocked = next((ln for ln in res.text.splitlines() if ln.startswith('BLOCKED:')), None)
         if blocked:
             self.db.update_task(t['id'], status='BLOCKED', result=blocked)
@@ -296,7 +321,10 @@ class TaskFlow:
         if all(r.ok for r in results):
             self.db.decision_outcome(t['id'], 'tier', 'pass')
             self.db.decision_outcome(t['id'], 'peer', 'pass')
-            self._deliver(t, results)
+            if self.cfg['spec_check'].get('enabled', True):
+                self.db.update_task(t['id'], status='SPEC', data=t['data'])
+            else:
+                self.db.update_task(t['id'], status='DELIVER', data=t['data'])
         else:
             t['data']['last_failure'] = checks_mod.failure_report(results)
             self.db.update_task(t['id'], data=t['data'])
@@ -322,12 +350,94 @@ class TaskFlow:
         self.db.event('escalate', t['id'], frm=t['lane'], to=nxt)
         self._start_lane(t, nxt)
 
-    def _deliver(self, t: dict, results) -> None:
+    # ------------------------------------------------------------ spec check
+    def _spec_check(self, t: dict) -> None:
+        """Independent Opus review of every acceptance criterion against the committed diff."""
+        sc = self.cfg['spec_check']
+        wt = Path(t['worktree'])
+        # Without triage criteria (e.g. Codex triage failed) the task statement is the criterion.
+        criteria = ((t['data'].get('triage') or {}).get('acceptance_criteria') or
+                    ['The task is fully implemented exactly as stated above.'])
+        diff = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', check=False)
+        if len(diff) > 60000:
+            diff = diff[:60000] + '\n[diff truncated; read the files in the worktree]'
+        rebuttals = t['data'].get('rebuttals') or []
+        prompt = render('spec_judge.md', worktree=wt, prompt=t['prompt'], base=t['base_ref'][:12],
+                        criteria='\n'.join(f'{i + 1}. {c}' for i, c in enumerate(criteria)), diff=diff,
+                        rebuttals=('\nThe worker rebutted earlier findings:\n' + '\n'.join(rebuttals) + '\n')
+                        if rebuttals else '')
+        res = self.workers.execute(LANES[sc['lane']], prompt, wt, write=False, schema=SPEC_SCHEMA,
+                                   log_name=f'{t["id"]}-spec')
+        if not res.ok or not res.structured:
+            raise RuntimeError(f'spec judge failed: {res.error[:300]}')   # daemon retries, then BLOCKED
+        verdict = res.structured
+        unmet = [c for c in verdict['criteria'] if not c['met']]
+        loops = t['data'].get('spec_loops', 0)
+        t['data'].setdefault('spec_reviews', []).append(
+            {'loop': loops, 'unmet': unmet, 'tampering': verdict['tampering'],
+             'tampering_reason': verdict['tampering_reason'], 'seconds': round(res.seconds)})
+        t['data'].pop('rebuttals', None)
+        if not unmet and not verdict['tampering']:
+            self.db.update_task(t['id'], status='DELIVER', data=t['data'])
+            return
+        feedback = self._spec_feedback(unmet, verdict)
+        if loops >= int(sc['max_loops']) + t['data'].get('spec_extra', 0):
+            t['data']['spec_wait'] = True
+            self.db.update_task(t['id'], status='WAIT_OWNER', data=t['data'])
+            self.n.send(f'Spec not met: {t["id"]}',
+                        f'{t["prompt"][:200]}\nAfter {loops} spec loop(s) the reviewer still reports:\n'
+                        f'{feedback[:2500]}',
+                        choices=[('Accept', f'accept {t["id"]}'), ('One more', f'retry {t["id"]}'),
+                                 ('Cancel', f'cancel {t["id"]}')], priority=4, tags='mag')
+            return
+        self._send_back(t, feedback)
+
+    @staticmethod
+    def _spec_feedback(unmet: list[dict], verdict: dict) -> str:
+        lines = [f'- UNMET: {c["criterion"]} — {c["reason"]}' for c in unmet]
+        if verdict['tampering']:
+            lines.append(f'- TAMPERING: {verdict["tampering_reason"]}')
+        return '\n'.join(lines)
+
+    def _send_back(self, t: dict, feedback: str) -> None:
+        t['data']['spec_loops'] = t['data'].get('spec_loops', 0) + 1
+        t['data']['spec_rerun'] = True
+        t['data']['last_failure'] = (
+            f'An independent reviewer (spec loop {t["data"]["spec_loops"]}) found the implementation does '
+            f'not yet meet the specification. The checks pass; do not weaken them.\n{feedback}\n'
+            'Fix these points. If you are sure a point is already satisfied, do not change code for it; '
+            'instead add a line starting with `REBUTTAL:` that cites the file and lines that satisfy it.')
+        self.db.event('spec_send_back', t['id'], loop=t['data']['spec_loops'])
+        self.db.update_task(t['id'], status='READY', data=t['data'])
+
+    def accept_spec(self, tid: str) -> None:
+        t = self.db.task(tid)
+        if not t or not t['data'].get('spec_wait'):
+            raise ValueError('task is not waiting on a spec decision')
+        t['data']['spec_wait'] = False
+        t['data']['spec_accepted_by_owner'] = True
+        self.db.update_task(tid, status='DELIVER', data=t['data'])
+
+    def spec_more(self, tid: str) -> None:
+        t = self.db.task(tid)
+        if not t or not t['data'].get('spec_wait'):
+            raise ValueError('task is not waiting on a spec decision')
+        t['data']['spec_wait'] = False
+        t['data']['spec_extra'] = t['data'].get('spec_extra', 0) + 1
+        last = (t['data'].get('spec_reviews') or [{}])[-1]
+        self._send_back(t, self._spec_feedback(last.get('unmet', []), {
+            'tampering': last.get('tampering'), 'tampering_reason': last.get('tampering_reason', '')}))
+
+    def _deliver(self, t: dict) -> None:
         wt = Path(t['worktree'])
         title = t['prompt'].strip().splitlines()[0][:72]
         git.git(wt, 'reset', '-q', '--soft', t['base_ref'])     # squash the wip snapshots
+        spec = t['data'].get('spec_reviews') or []
+        spec_note = (f'Spec review: {len(spec)} round(s)' +
+                     (', accepted by owner' if t['data'].get('spec_accepted_by_owner') else ', all criteria met')
+                     if spec else 'Spec review: skipped')
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
-                                 f'Checks:\n{checks_mod.summary(results)}')
+                                 f'Checks:\n{t["data"].get("checks_result", "")}\n{spec_note}')
         stat = git.diffstat(wt, t['base_ref'])
         pushed = ''
         if sha and self.cfg['delivery']['push_branch'] and git.github_slug(Path(t['repo'])):
@@ -340,7 +450,8 @@ class TaskFlow:
         self.db.update_task(t['id'], status='DONE', result=result, data=t['data'])
         git.remove_worktree(Path(t['repo']), wt)
         self.n.send(f'Done {t["id"]} ({t["lane"]})',
-                    f'{title}\n{result}\n{t["data"]["checks_result"]}\n{stat[-800:]}', tags='white_check_mark')
+                    f'{title}\n{result}\n{t["data"].get("checks_result", "")}\n{spec_note}\n{stat[-800:]}',
+                    tags='white_check_mark')
 
     # -------------------------------------------------------------------- deep
     def _to_deep(self, t: dict, reason: str) -> None:

@@ -61,6 +61,8 @@ class App:
                 self.cancel(ident)
             elif verb == 'retry':
                 self.retry(ident)
+            elif verb == 'accept':
+                self.tasks.accept_spec(ident)
             else:
                 self.db.event('reply_ignored', line=line)
                 return
@@ -85,6 +87,9 @@ class App:
     def retry(self, ident: str) -> None:
         """Re-run a BLOCKED/FAILED task from triage, or a FAILED case from its last Pro wait."""
         t = self.db.task(ident)
+        if t and t['status'] == 'WAIT_OWNER' and t['data'].get('spec_wait'):
+            self.tasks.spec_more(ident)       # one more spec loop
+            return
         if t and t['status'] in ('BLOCKED', 'FAILED'):
             self.db.update_task(ident, status='TRIAGED' if t['tier'] else 'NEW', passes=0, lane_passes=0)
             return

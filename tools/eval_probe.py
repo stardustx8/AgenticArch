@@ -145,7 +145,7 @@ def semif_probs(rows, question, options):
     return out, statistics.median(secs)
 
 
-def codex_preds(rows, labels, question):
+def codex_preds(rows, labels, question, lane_name='luna_low'):
     from aa import config
     from aa.workers import LANES, Workers
     cfg = config.load()
@@ -159,7 +159,7 @@ def codex_preds(rows, labels, question):
         opts = '\n'.join(f'- {k}: {v}' for k, v in labels.items())
         prompt = (f'Classify. Do not run commands or read files.\n\nQuestion: {question}\nOptions:\n{opts}\n\n'
                   f'Input:\n<<<\n{r["text"][:12000]}\n>>>')
-        res = w.execute(LANES['luna_low'], prompt, scratch, write=False, schema=schema,
+        res = w.execute(LANES[lane_name], prompt, scratch, write=False, schema=schema,
                         log_name=f'probe-{r["id"]}')
         return r['id'], ((res.structured or {}).get('label'), res.seconds)
 
@@ -206,6 +206,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--probes', default=','.join(PROBES))
     ap.add_argument('--codex', action='store_true')
+    ap.add_argument('--judges', default='', help='extra judge lanes, e.g. opus_medium,opus_high')
     a = ap.parse_args()
     L = [f'# Probe benchmark {time.strftime("%Y-%m-%d %H:%M")}', '',
          'Blind labelled data from a separate Opus run (eval/probes/). SemIf wording chosen on dev; '
@@ -233,6 +234,11 @@ def main() -> int:
             q, opts = spec['variants'][best]
             cp = codex_preds(test, opts, q)
             results['codex luna low'] = metrics(test, {k: v[0] for k, v in cp.items()}, labels)
+        for lane_name in filter(None, a.judges.split(',')):
+            q, opts = spec['variants'][best]
+            jp = codex_preds(test, opts, q, lane_name)
+            results[lane_name] = metrics(test, {k: v[0] for k, v in jp.items()}, labels)
+            raw.setdefault(name + '_judges', {})[lane_name] = jp
         raw[name] = {'semif_variant': best, 'semif': best_probs, 'rules': rp,
                      'codex': cp}
         L += [f'## {name} (test n={len(test)}, labels: {", ".join(labels)})', '',

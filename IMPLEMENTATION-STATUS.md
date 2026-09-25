@@ -12,6 +12,8 @@
 - Triage with owner pick on disagreement (exercised live), checks from `.agenticarch.toml`.
 - `aa doctor`: both subscriptions, CLM, ntfy, private case-repo access all OK.
 
+- Spec-check loop: Opus 5.5 judges acceptance criteria after checks; max 3 loops, then owner (D017).
+
 ## Implemented, tested offline, not yet exercised live
 
 - Deep-case flow end to end (Pro draft, Opus x Astra rounds, GO/CLARIFY, owner questions,

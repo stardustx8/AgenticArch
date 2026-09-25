@@ -5,7 +5,7 @@
   aa show ID                                        details, recent events
   aa prompt CASE                                    the current one-line Pro prompt
   aa answer "tier <task> <tier>" | "checks <task> ok|none" | "answer <case> <text>"
-            | "resume <case>" | "cancel <id>" | "retry <task>"
+            | "resume <case>" | "cancel <id>" | "retry <task>" | "accept <task>"
   aa doctor                                         verify subscriptions, CLM, ntfy, git
   aa daemon                                         run the coordinator (systemd does this)
 """
@@ -61,8 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         print('queued for the daemon')
         return 0
     if a.cmd == 'status':
-        rows = db.tasks() if a.all else db.tasks(('NEW', 'TRIAGED', 'READY', 'VERIFY', 'WAIT_OWNER',
-                                                  'DEEP', 'BLOCKED'))
+        rows = db.tasks() if a.all else db.tasks(('NEW', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'DELIVER',
+                                                  'WAIT_OWNER', 'DEEP', 'BLOCKED'))
         if not rows:
             print('no active tasks' if not a.all else 'no tasks')
         for t in rows:

@@ -34,6 +34,11 @@ challengers = ["opus_high", "astra_high"]
 max_parallel = 3
 timeout_s = 3600
 
+[spec_check]
+enabled = true
+lane = "opus_medium"     # independent reviewer after checks pass
+max_loops = 3             # then the owner decides (Accept / One more / Cancel)
+
 [delivery]
 push_branch = true        # push aa/<task> branches to origin after checks pass
 

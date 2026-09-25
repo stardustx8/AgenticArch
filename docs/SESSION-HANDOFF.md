@@ -16,7 +16,10 @@ first case initializes it.
 
 ## Next steps
 
-1. Owner decision: triage policy — Codex alone, or Codex + SemIf with ask-on-disagreement
+0. Candidates still open (eval/PROBES.md): SemIf secret gate, failure triage
+   (rerun + base-commit run + SemIf environment flag), worker status field;
+   Claude worker sandbox needs `sudo apt install socat`, then `workers.claude_sandbox = true`.
+1. (Done: triage policy = Codex decides.) Owner decision: triage policy — Codex alone, or Codex + SemIf with ask-on-disagreement
    (~20% pings) or take-higher-if-1-apart (~6% pings). Data: eval/RESULTS.md.
 2. First real deep case against a GitHub target repo (owner pastes the Pro prompts).
 3. Install skills on the Mac (`tools/install_skills.py`).

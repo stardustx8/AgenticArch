@@ -84,3 +84,12 @@ Benchmark (eval/RESULTS.md): tier accuracy on a blind holdout — Codex triage 9
 stopped but selectable (`decider.backend`). Rules are kept as a zero-cost backend and
 benchmark baseline. Finding: as a second voter next to Codex triage, no decider lowered
 total error cost; the owner decides whether to keep ask-on-disagreement.
+
+## D017: spec-check loop with Opus 5.5, added 2026-09-26
+
+Owner idea, tested first (eval/PROBES.md, blind 80-case spec set): SemIf per criterion
+catches 70% of violations, Codex Luna low 100% with 20% false send-backs, Opus 5.5 medium
+and high 40/40 with none (caveat: Opus also generated the set). Owner decision: Opus 5.5
+judges every acceptance criterion and test tampering after the checks pass; unmet goes back
+to the worker (which may rebut); max 3 loops, then the owner. Default effort medium.
+Spec loops have their own budget and do not trigger lane escalation.

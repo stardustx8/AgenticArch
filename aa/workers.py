@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -41,6 +42,10 @@ LANES: dict[str, Lane] = {l.name: l for l in (
 SCRUB = ('OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY',
          'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK',
          'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK')
+
+
+AUTH_FAILURE = re.compile(r'401 Unauthorized|Incorrect API key|invalid[_ ]api[_ ]key|'
+                          r'authentication_error|not logged in|please (?:re-?)?log ?in', re.I)
 
 
 class BillingError(RuntimeError):
@@ -153,14 +158,20 @@ class Workers:
                 for k, v in (ev.get('usage') or {}).items():
                     usage[k] = usage.get(k, 0) + (v or 0)
         text = out_file.read_text() if out_file.exists() else ''
+        if p.returncode != 0 and AUTH_FAILURE.search(p.stdout[-20000:] + p.stderr[-5000:]):
+            # A rejected login is an owner problem, not a code problem: never retry/escalate on it.
+            self._auth_ok.pop('codex', None)
+            raise BillingError('Codex login rejected by the server (401). Re-login with `codex login` '
+                               '(ChatGPT account), then `aa answer "retry <task>"`.')
         structured = _json_or_none(text) if schema is not None else None
         ok = p.returncode == 0 and bool(text.strip()) and (schema is None or structured is not None)
         return Result(ok, text, structured, [lane.model] if ok else [], usage,
                       error='' if ok else (p.stderr[-2000:] or f'exit {p.returncode}'))
 
     def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
+        # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.
         cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
-               '--output-format', 'json', '--no-session-persistence']
+               '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config']
         if write and self.claude_sandbox:
             cmd += ['--permission-mode', 'auto', '--settings', json.dumps(sandbox_settings(cwd, extra_dirs)),
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
@@ -186,6 +197,10 @@ class Workers:
             if 'sandbox required but unavailable' in err:
                 raise BillingError('Claude sandbox unavailable (install bubblewrap and socat): ' + err[:300])
             return Result(False, '', error=err)
+        if data.get('is_error') and AUTH_FAILURE.search(json.dumps(data)[:20000]):
+            self._auth_ok.pop('claude', None)
+            raise BillingError('Claude login rejected by the server. Re-login with `claude auth login`, '
+                               'then `aa answer "retry <task>"`.')
         seen = list((data.get('modelUsage') or {}).keys())
         text = data.get('result') or ''
         structured = data.get('structured_output')

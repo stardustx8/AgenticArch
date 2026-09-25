@@ -73,11 +73,22 @@ class FakeWorkers(Workers):
             if self.script['triage'] is None:
                 return Result(False, '', None, [], error='triage timeout')
             return Result(True, '', self.script['triage'], [lane.model])
-        fn = self.script[_kind(log_name)]
+        kind = _kind(log_name)
+        if kind == 'spec' and 'spec' not in self.script:
+            return Result(True, '', spec_verdict([]), [lane.model])      # default: all criteria met
+        fn = self.script[kind]
         return fn(lane, Path(cwd), prompt, extra_dirs)
 
 
+def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
+    return {'criteria': [{'criterion': c, 'met': False, 'reason': f'{c} missing'} for c in unmet] +
+                        [{'criterion': 'a', 'met': True, 'reason': 'ok'}],
+            'tampering': tampering, 'tampering_reason': 'skipped a test' if tampering else ''}
+
+
 def _kind(log_name: str) -> str:
+    if log_name.endswith('-spec'):
+        return 'spec'
     for k in ('-fix', '-opus', '-astra'):
         if k in log_name:
             return k.strip('-')
@@ -274,7 +285,7 @@ class LocalFlowTests(unittest.TestCase):
         attempts = []
 
         def flaky(lane, cwd, prompt, extra):
-            attempts.append((lane.name, 'checks failed' in prompt))
+            attempts.append((lane.name, 'Feedback on it' in prompt and 'exit' in prompt))
             if len(attempts) == 3:
                 (cwd / 'done.txt').write_text('ok')
             return Result(True, 'tried', None, [lane.model])
@@ -304,6 +315,111 @@ class LocalFlowTests(unittest.TestCase):
         self.assertEqual(lanes[:4], ['astra_high', 'astra_high', 'opus_high', 'opus_high'])
         self.assertNotIn('opus_medium', lanes, 'peer choice switches models only, not effort')
         self.assertEqual(t['status'], 'DEEP')
+
+    def test_spec_loop_sends_back_until_criteria_met(self):
+        verdicts = [spec_verdict(['handles empty input']), spec_verdict([])]
+        prompts = []
+
+        def judge(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            return Result(True, '', verdicts.pop(0), [lane.model])
+
+        def work(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            (cwd / 'done.txt').write_text('ok' + str(len(prompts)))
+            return Result(True, 'REBUTTAL: empty input handled in app.py:3' if len(prompts) > 2 else 'done',
+                          None, [lane.model])
+
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work, 'spec': judge}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(t['data']['spec_loops'], 1)
+        self.assertIn('UNMET: handles empty input', prompts[2])          # worker saw the finding
+        self.assertIn('REBUTTAL: empty input handled', prompts[3])      # judge saw the rebuttal
+        spec_lane = [c[0] for c in self.env.workers.calls if c[1].endswith('-spec')]
+        self.assertEqual(spec_lane, ['opus_medium', 'opus_medium'])
+        self.assertEqual(t['passes'], 1, 'spec loops do not consume the check-retry budget')
+
+    def test_spec_loop_stops_after_max_loops_and_owner_accepts(self):
+        judge = lambda lane, cwd, prompt, extra: Result(True, '', spec_verdict(['criterion b']), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
+                       FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(80)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['data']['spec_loops']), ('WAIT_OWNER', 3))
+        self.assertEqual(len([c for c in self.env.workers.calls if c[1].endswith('-spec')]), 4)
+        title, msg, kw = self.env.sent[-1]
+        self.assertIn('Spec not met', title)
+        self.assertIn(('Accept', f'accept {tid}'), kw['choices'])
+        self.env.db.inbox_put(f'accept {tid}')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        msg = sh(self.env.target, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
+        self.assertIn('accepted by owner', msg)
+
+    def test_owner_one_more_spec_loop(self):
+        verdicts = [spec_verdict(['b'])] * 4 + [spec_verdict([])]
+        judge = lambda lane, cwd, prompt, extra: Result(True, '', verdicts.pop(0), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
+                       FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(80)
+        self.assertEqual(self.env.db.task(tid)['status'], 'WAIT_OWNER')
+        self.env.db.inbox_put(f'retry {tid}')
+        self.env.run(40)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['data']['spec_loops']), ('DONE', 4))
+
+    def test_tampering_flag_sends_back(self):
+        verdicts = [spec_verdict([], tampering=True), spec_verdict([])]
+        judge = lambda lane, cwd, prompt, extra: Result(True, '', verdicts.pop(0), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
+                       FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['data']['spec_loops']), ('DONE', 1))
+        self.assertTrue(t['data']['spec_reviews'][0]['tampering'])
+
+    def test_no_acceptance_criteria_judges_task_statement(self):
+        prompts = []
+
+        def judge(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        tri = triage('routine')
+        tri['acceptance_criteria'] = []
+        self.env = Env(self.tmp, {'triage': tri, 'work': write_done, 'spec': judge}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'add the widget')
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertIn('fully implemented exactly as stated', prompts[0])
+
+    def test_spec_judge_failure_blocks_after_retries(self):
+        bad = lambda lane, cwd, prompt, extra: Result(False, '', None, [], error='timeout')
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': bad},
+                       FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(40)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'BLOCKED')
+        self.assertIn('spec judge failed', t['result'])
+
+    def test_worker_auth_failure_blocks_without_escalation(self):
+        from aa.workers import BillingError
+
+        def rejected(lane, cwd, prompt, extra):
+            raise BillingError('Codex login rejected by the server (401)')
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': rejected}, FakeCLM('bounded'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['lane']), ('BLOCKED', 'luna_high'))
+        self.assertIn('login rejected', t['result'])
 
     def test_billing_error_blocks_without_dispatch(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'billing_error': True},
@@ -614,6 +730,7 @@ class WorkerTests(unittest.TestCase):
             w.verify_billing = lambda cli: None
             self.assertTrue(w.execute(LANES['opus_high'], 'p', Path(tmp)).ok)
         cmd = runner.call_args[0][0]
+        self.assertIn('--strict-mcp-config', cmd)
         self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'auto')
         settings = json.loads(cmd[cmd.index('--settings') + 1])['sandbox']
         self.assertTrue(settings['failIfUnavailable'])
@@ -631,6 +748,16 @@ class WorkerTests(unittest.TestCase):
             w.verify_billing = lambda cli: None
             with self.assertRaises(BillingError):
                 w.execute(LANES['opus_high'], 'p', Path(tmp))
+
+    def test_codex_auth_rejection_raises_billing_error_not_retry(self):
+        from aa.workers import BillingError
+        out = '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Incorrect API key provided"}}'
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 1, out, ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(self.cfg(tmp), runner=runner)
+            w.verify_billing = lambda cli: None
+            with self.assertRaises(BillingError):
+                w.execute(LANES['luna_high'], 'p', Path(tmp))
 
     def test_codex_command_is_subscription_exec_with_effort(self):
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))

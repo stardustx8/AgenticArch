@@ -25,8 +25,12 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
-  -> pass: squash to one commit, push branch, ntfy "Done"
      fail: retry same lane with the failure (2x), then escalate lane, then deep case
+  -> pass: spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
+     against the diff, read-only in the worktree
+       unmet -> back to the same worker with the reasons; worker fixes or answers REBUTTAL:
+       after 3 loops -> ntfy: Accept / One more / Cancel
+  -> met: squash to one commit, push branch, ntfy "Done"
 ```
 
 The coordinator, never a model, commits, runs checks and decides pass/fail. Workers
@@ -58,7 +62,8 @@ edit outside `cases/<id>/` or to the target snapshot is reverted and logged.
   post replies to `agenticarch-replies`; the daemon reads them.
 - Workstation: `aa status`, `aa show <id>`, `aa prompt <case>`, `aa answer "<reply>"`.
 - Reply grammar: `tier <task> <tier>`, `checks <task> ok|none`, `answer <case> <text>`,
-  `resume <case>`, `cancel <id>`, `retry <task>`.
+  `resume <case>`, `cancel <id>`, `retry <task>` (also: one more spec loop), `accept <task>`
+  (deliver although the spec reviewer still objects).
 
 ## Local decider: what it decides and how well
 
