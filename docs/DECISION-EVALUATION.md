@@ -4,7 +4,7 @@ No accuracy, speedup or cost reduction for this workstation is claimed yet. The 
 
 ## Baselines
 
-Compare the same scoped tasks under: (A) deterministic policy plus existing Codex/search; (B) SemIf routing advice alone; (C) one new decision family at a time; and (D) the useful combination. For retrieval, include the existing lexical/embedding/reranker route. For test selection, compare simple failure-location prioritization. For specialist training, compare the unchanged general SemIf backend. Include all failed and paused tasks.
+Compare the same scoped tasks under: (A) deterministic policy plus existing Codex/search; (B) CLM routing advice alone; (C) one new decision family at a time; and (D) the useful combination. For retrieval, include the existing lexical/embedding/reranker route. For test selection, compare simple failure-location prioritization. For specialist training, compare the unchanged general CLM backend. Include all failed and paused tasks.
 
 Record accepted behavior, regressions, rework, mandatory-check coverage, time-to-first-reproducible-failure, human intervention, remote usage and local compute. Separately measure cold/warm scoring, prefill length, p50/p95 latency, batch size, peak GPU/system memory and interference with interactive coding. Do not optimize decision latency while making end-to-end tasks slower.
 
@@ -21,7 +21,7 @@ Record accepted behavior, regressions, rework, mandatory-check coverage, time-to
 | Playbooks | Known branch coverage; unexpected-state abstention | Lower overhead on repeated diagnostic patterns | Only vetted capabilities, bounded exits |
 | Counterexamples | Independently valid reproductions per compute budget | Confirmed defects discovered before release | Trusted oracle separate from generated input |
 | Event filtering | Blocker recall, notification count | Less noise with prompt blocker visibility | Required failures never hidden |
-| Specialists | Held-out selective risk and latency vs SemIf | Actual resource benefit without quality loss | No automatic training/policy promotion |
+| Specialists | Held-out selective risk and latency vs CLM | Actual resource benefit without quality loss | No automatic training/policy promotion |
 
 ## Data and labels
 
@@ -29,13 +29,13 @@ Use authorized project data only. Split by project/task root and time, not by ra
 
 Log labels for uncertain cases **and a random sample of confident cases**; otherwise confident mistakes become invisible. Models agreeing is a weak label, not ground truth. Use actual test outcomes only for propositions those tests check; test success is not a universal product-quality label. Do not upload private training data just because a review repository is private.
 
-Report denominators, confusion matrices, confidence intervals and uncertainty. Calibration metrics such as Brier score or NLL and reliability plots are separate from classification accuracy. A raw score threshold shared across all operators is unacceptable. Calibrate per family with a documented artifact and validate after distribution/backend changes. The word “calibrated” alone is not a promotion gate. [S03, S11 in RESEARCH-SOURCES.md]
+Report denominators, confusion matrices, confidence intervals and uncertainty. Calibration metrics such as Brier score or NLL and reliability plots are separate from classification accuracy. A raw score threshold shared across all operators is unacceptable. Calibrate per family with a documented artifact and validate after distribution/backend changes. The word “calibrated” alone is not a promotion gate. These are proposed evaluation requirements, not a claim that a released CLM deployment has already passed them.
 
 ## Required adversarial fixtures
 
 Include missing relevant context, all options poor, ambiguous observations, paraphrased requirements, reversed option ordering, distractor evidence, injected instructions in logs, cross-project cache collisions, stale revisions, changed permissions, dependent questions submitted together, unsupported model/backends and memory pressure. Seed “passing” checks that test the wrong behavior, duplicate-looking objections that differ in a material detail, and confident but incorrect teacher labels.
 
-Batch/shared-state modes must be compared against direct scoring. Any discrepancy is reported; equal aggregate accuracy is not bitwise equivalence. Small score differences near a boundary should abstain rather than trigger uncontrolled action. Use explicit tie behavior and an insufficient-evidence option.
+Cached state/action scoring must be compared against uncached scoring. Any discrepancy is reported; equal aggregate accuracy is not bitwise equivalence. Small score differences near a boundary should abstain rather than trigger uncontrolled action. Use explicit tie behavior and an insufficient-evidence option.
 
 ## Promotion and rollback
 

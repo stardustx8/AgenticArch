@@ -1,6 +1,6 @@
 # Model, harness and effort research
 
-Checked 2026-09-25. This is an evidence-based starting policy, not a claim of a universal optimum. The [machine-readable registry](../config/evidence-registry.json) records source type, scope, observations and exclusions. Its source IDs are used by the decision catalog. Public benchmark results are priors; they do not qualify a local subscription route.
+Checked 2026-09-25. This is an evidence-based starting policy, not a claim of a universal optimum. The [machine-readable registry](../config/evidence-registry.json) records source type, scope, observations and exclusions. Its descriptive source IDs are retained as supplemental evidence; the active routing catalog uses the separate S-number registry. See [the integration record](INTEGRATION-RECONCILIATION.md) for namespace and profile mappings. Public benchmark results are priors; they do not qualify a local subscription route.
 
 ## Harness conclusion
 

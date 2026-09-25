@@ -14,4 +14,4 @@ List the actual checks to run locally and what each establishes. Do not invent a
 
 ## Local-context adaptation boundaries
 
-Identify mechanical adjustments permitted without redesign and the differences that must reopen Pro/Fable review.
+Identify mechanical adjustments permitted without redesign and the differences that must reopen Pro/Claude review.

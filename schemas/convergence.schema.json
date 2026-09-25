@@ -29,7 +29,7 @@
           "role": {
             "enum": [
               "pro",
-              "fable"
+              "claude"
             ]
           },
           "verdict": {
@@ -85,13 +85,13 @@
           "role": {
             "enum": [
               "pro",
-              "fable"
+              "claude"
             ]
           },
           "phase": {
             "enum": [
               "initial",
-              "fable_challenge",
+              "claude_challenge",
               "pro_response",
               "review"
             ]
@@ -105,6 +105,14 @@
           },
           "durable_output_verified": {
             "type": "boolean"
+          },
+          "model_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "review_epoch": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -114,7 +122,9 @@
           "phase",
           "sequence",
           "identity_verified",
-          "durable_output_verified"
+          "durable_output_verified",
+          "model_id",
+          "review_epoch"
         ],
         "additionalProperties": false
       }
@@ -135,6 +145,16 @@
     },
     "required_deliverables_present": {
       "type": "boolean"
+    },
+    "review_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "claude_model_id": {
+      "enum": [
+        "claude-fable-5-1",
+        "claude-opus-5-5"
+      ]
     }
   },
   "required": [
@@ -147,7 +167,9 @@
     "unresolved_blockers",
     "manifest_verified",
     "evidence_references_verified",
-    "required_deliverables_present"
+    "required_deliverables_present",
+    "review_epoch",
+    "claude_model_id"
   ],
   "additionalProperties": false
 }

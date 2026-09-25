@@ -1,7 +1,7 @@
-# Using this case template
+# Case template
 
-Copy these generic files into a new authorized review case. They are templates, not a completed or approved case. Generate `case.json`, `CONTEXT-MANIFEST.json`, `solution-manifest.json`, role reviews and turn receipts from real inputs; do not fill them with invented hashes or approvals.
+Copy only into an authorized case workspace. These are unfilled templates, not proof of a review. Generate case.json, manifests, turns and receipts from real input. Use case schema v2 with a selected Claude model and review_epoch. Bind the original coordinator task/session privately.
 
-The solution manifest includes `SOLUTION.md`, `IMPLEMENTATION.md`, `VALIDATION.md`, `objections.json`, and any patches or supporting evidence actually relied on. It excludes itself, the evolving dialogue, transport receipts, approvals and `LOCAL-DELTA.md`. The requirements digest covers the frozen brief and acceptance criteria separately. A changed brief or input bundle invalidates approvals even when solution bytes remain unchanged.
+Hash explicit approval-relevant solution, implementation, validation/rollback, objection and patch files. Exclude the manifest itself, dialogue, receipts and approval records to avoid circular hashing. Hash requirements and evidence separately. Freeze participant identity in the epoch; preserve old history and open findings when starting a new epoch.
 
-Critical/high findings remain blocking unless a substantive fix or evidence-backed resolution is explicitly accepted. Put residual risk dispositions into included solution content so they cannot be changed behind existing approvals. Model self-reported identity is not transport proof.
+The reviewer model cannot attest its own identity or invent test execution. Fill approvals only from actual verified contributions. Follow [the protocol](../../docs/ESCALATION-PROTOCOL.md). Keep private chat bindings and credentials out of the case artifacts.

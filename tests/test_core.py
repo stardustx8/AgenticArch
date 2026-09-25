@@ -17,13 +17,13 @@ A, B, C, D = ('a' * 64, 'b' * 64, 'c' * 64, 'd' * 64)
 
 def valid_case():
     return CaseReview('case-1', A, B, C, [
-        Review('fable', 'APPROVE', A, B, C, 'f1'),
+        Review('claude', 'APPROVE', A, B, C, 'f1'),
         Review('pro', 'APPROVE', A, B, C, 'p1'),
     ], [
-        Receipt('f1', 'case-1', 'fable', 'fable_challenge', 1, True, True),
-        Receipt('p1', 'case-1', 'pro', 'pro_response', 2, True, True),
+        Receipt('f1', 'case-1', 'claude', 'claude_challenge', 1, True, True, 'claude-fable-5-1'),
+        Receipt('p1', 'case-1', 'pro', 'pro_response', 2, True, True, 'gpt-6-pro-web'),
     ], manifest_verified=True, evidence_references_verified=True,
-       required_deliverables_present=True)
+       required_deliverables_present=True, claude_model_id='claude-fable-5-1')
 
 
 def valid_completion():
@@ -37,7 +37,8 @@ class PolicyTests(unittest.TestCase):
         validate_policy(POLICY)
 
     def test_four_direct_lanes(self):
-        for difficulty, expected in zip(('routine', 'bounded', 'medium_tough', 'tough'), Lane):
+        for difficulty, expected in zip(('routine', 'bounded', 'medium_tough', 'tough'),
+                (Lane.LUNA_LOW, Lane.LUNA_HIGH, Lane.ASTRA_HIGH, Lane.PRO_WEB)):
             with self.subTest(difficulty=difficulty):
                 self.assertEqual(route(difficulty).lane, expected)
 
@@ -73,7 +74,7 @@ class PolicyTests(unittest.TestCase):
             route('routine', ['unknown'])
 
     def test_weakened_policy_rejected(self):
-        for group, key, value in [('semif', 'can_lower_floor', True),
+        for group, key, value in [('clm', 'can_lower_floor', True),
                                    ('debate', 'same_chat_for_pro', False),
                                    ('verification', 'nonempty_required_checks', False)]:
             policy = copy.deepcopy(POLICY)
@@ -167,7 +168,7 @@ class ConvergenceTests(unittest.TestCase):
             case = valid_case()
             changed = replace(case.reviews[0], **{field: D})
             with self.subTest(field=field):
-                self.assertIn('fable_stale_approval', convergence_errors(
+                self.assertIn('claude_stale_approval', convergence_errors(
                     replace(case, reviews=[changed, case.reviews[1]])))
 
     def test_blockers_and_missing_manifest(self):
@@ -176,11 +177,11 @@ class ConvergenceTests(unittest.TestCase):
 
     def test_latest_verdict_wins_not_an_old_approval(self):
         case = valid_case()
-        receipt = Receipt('f2', case.case_id, 'fable', 'review', 3, True, True)
-        review = Review('fable', 'REVISE', A, B, C, 'f2')
+        receipt = Receipt('f2', case.case_id, 'claude', 'review', 3, True, True, 'claude-fable-5-1')
+        review = Review('claude', 'REVISE', A, B, C, 'f2')
         errors = convergence_errors(replace(case, receipts=[*case.receipts, receipt],
                                             reviews=[review, *case.reviews]))
-        self.assertIn('fable_not_approved', errors)
+        self.assertIn('claude_not_approved', errors)
 
     def test_unverified_or_wrong_case_receipt_rejected(self):
         for delta in ({'identity_verified': False}, {'case_id': 'other'},
@@ -200,8 +201,8 @@ class ConvergenceTests(unittest.TestCase):
 
     def test_new_turn_without_verdict_invalidates_old_approval(self):
         case = valid_case()
-        receipt = Receipt('f2', case.case_id, 'fable', 'review', 3, True, True)
-        self.assertIn('fable_latest_turn_unreviewed', convergence_errors(
+        receipt = Receipt('f2', case.case_id, 'claude', 'review', 3, True, True, 'claude-fable-5-1')
+        self.assertIn('claude_latest_turn_unreviewed', convergence_errors(
             replace(case, receipts=[*case.receipts, receipt])))
 
     def test_budget_is_pause_not_agreement(self):

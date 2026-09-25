@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AgenticArch normalized SemIf advice; not the upstream wire format",
+  "title": "AgenticArch normalized CLM advice; not the upstream wire format",
   "type": "object",
   "properties": {
     "schema_version": {

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "harness": "codex",
+  "status": "requires_local_qualification",
+  "billing": "subscription_only",
+  "api_fallback": false,
+  "openai_default": "codex_subscription",
+  "openai_optional": null,
+  "claude": "claude_code_subscription",
+  "pro": "chatgpt_web_subscription",
+  "clm": "http://127.0.0.1:8700",
+  "routing_catalog": "../../config/model-routing.json",
+  "policy": "../../config/policy.json",
+  "approval_bypass": false,
+  "native_pi_claude_oauth": false,
+  "route_changes": "between worker jobs",
+  "effort_changes": "between generations only",
+  "native_pi_savings_claim": false
+}

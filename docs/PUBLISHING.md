@@ -1,41 +1,13 @@
-# Publish the implementation kit
+# Publication and recovery
 
-Target: `https://github.com/stardustx8/AgenticArch.git`, branch `main`.
+Target: stardustx8/AgenticArch, branch main. Future sessions start from the current remote, START-HERE and SESSION-HANDOFF, not old transfer archives.
 
-## Work from the published repository
+Read the actual branch head and worktree. Preserve concurrent changes. Run the full tests, kit checks and relevant harness checks. Publish only inspected source/docs/templates, with no private state or credentials. No force push, rewritten history, visibility change or permission bypass.
 
-For future development, clone or fetch the actual remote repository and read `START-HERE.md` plus `docs/SESSION-HANDOFF.md`. The original local bundle/ZIP is a historical transfer copy, not the latest shared state. Do not push its unrelated preparation history over an existing remote branch. Preserve concurrent work, use normal integration commits and update the handoff alongside source changes.
+For a direct Git push, compare the resulting remote commit with the local intended commit. For GitHub connector tree/commit publication, GitHub creates its own commit identity: compare the entire path/mode/blob tree with the prepared source tree and confirm the actual branch points to it. Unreferenced trees/blobs, local commits and prepared ZIPs do not establish publication.
 
-## Publication prerequisites
+If main advanced, reconcile current changes before creating the integration commit. Use the current head as parent and a non-forced ref update. A rejected update is not permission to erase another session's work.
 
-Use a GitHub identity already authorized by the owner. Ensure the installed GitHub app actually includes AgenticArch in its repository selection and can write repository contents. User-level `push: true` metadata is not proof that the connected app can write. A rejected write must be reported, not worked around with another account or altered permissions.
+Rollback uses ordinary revert commits. Skill rollback is separate: stop/checkpoint relevant jobs, inspect the private backup manifest, restore only affected files and preserve subsequent owner edits/unshipped helpers. Do not erase a shared skill root or credential store.
 
-Use current readback to distinguish a truly empty repository from an existing branch. Do not force-push, discard files, change visibility or bypass branch protection. Publication permission for this kit does not automatically create the separate review repository or export real case data.
-
-## From the companion Git bundle
-
-The bundle contains this kit's initialized local `main`, with no runtime case data or credentials. In a new destination directory:
-
-```sh
-git clone --branch main /absolute/path/AgenticArch.bundle AgenticArch
-cd AgenticArch
-python3 -m unittest discover -s tests -v
-python3 tools/check_kit.py
-git remote set-url origin https://github.com/stardustx8/AgenticArch.git
-git ls-remote --heads origin
-git push -u origin main
-```
-
-The normal push safely rejects non-fast-forward remote changes; never add a force flag. If the remote is no longer empty, fetch it and reconcile its contents in a reviewed worktree before publishing. The bundle is a transport convenience, not proof that GitHub received anything.
-
-## From the source ZIP
-
-Extract into a new directory, inspect the kit and run the checks above. The archive contains source files, not `.git`. In that extracted kit directory, initialize `main`, add only the inspected kit files, commit using the locally configured Git identity, add the target remote and use an ordinary push. Do not stage unrelated files from a parent directory or invent the owner's identity in Git config.
-
-## Verify publication
-
-Read the actual remote branch head and a representative set of files at that commit, including both `SKILL.md` files, the policy, requirements and master prompt. For a direct Git push, record local and remote commit IDs and verify they match. For publication through the GitHub connector, GitHub creates its own commit identity: verify every remote file path, mode and blob hash against the prepared source tree instead of claiming the original local preparation commit was pushed. A local commit, successful ZIP creation or permission metadata alone is not a published repository.
-
-## Revert and skill rollback
-
-Repository changes use ordinary revert commits, not rewritten history. Skill installation is separate from publishing. For a skill rollback, stop active jobs, inspect the private installer backup manifest, restore only the affected skill files/tree to its recorded target and remove only newly created files listed in that manifest. Preserve unrelated helpers and owner edits made after installation. Reload the actual custom Codex client and verify both identifiers resolve exactly once. Do not erase an entire shared skills root.
+Both harness packages remain on main and share the same policy. The review repository is separate; its creation and real exports need applicable scoped authorization. No license is selected implicitly by publication.

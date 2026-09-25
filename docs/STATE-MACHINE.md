@@ -1,46 +1,21 @@
-# Runtime state machine
-
-Normative target, not implemented by the pure reference kernel.
+# State machine
 
 ## Local task
 
-```text
-NEW -> INTAKE -> ROUTED -> WORKER_RUNNING -> VERIFYING
-                            ^                  |
-                            |-- RETRY ---------|
-                            |-- ESCALATE ------| -> PRO_CASE
-                                               | -> COMPLETION_REVIEW -> DELIVERED
-                                               | -> WAIT_ENVIRONMENT / WAIT_CAPABILITY
-```
+INTAKE -> RISK_ASSESSMENT -> ELIGIBILITY -> CONTEXT_READY -> WORKER_PENDING -> VERIFYING -> COMPLETE, RETRY or DEEP_REVIEW. Each transition has trusted input identity, scope and a durable event. Missing capability/auth/quota/context creates an explicit wait; it does not authorize a different billing method or waive checks.
 
-The controller maintains an assessed task category and routing floor before dispatch. `assessment_only` cannot enter `WORKER_RUNNING` with write authority. `DELIVERED` requires successful final gates plus evidence of the requested delivery action. Stop/cancel can interrupt any active state; it does not erase side effects.
+A worker has a nested generation gate: NEED_DECISION -> PENDING_APPLICATION -> APPLIED -> IN_FLIGHT -> NEXT_CHECKPOINT. A still-valid lease can repeat the checkpoint without another CLM call. Only observed application permits IN_FLIGHT. New input, failure, model/manual/policy/scope/deployment change or resume invalidates the lease. Cancellation must settle before another generation starts.
 
-## Review case
+## Deep case
 
-```text
-PREPARED -> PRO_PENDING -> PRO_READY -> FABLE_PENDING
-                                       |        |
-                      PRO_REVIEW_PENDING <------|
-                            |                   |
-                            |--- FABLE_PENDING -|
-                            |
-                      CONVERGENCE_CHECK
-                            |
-                         CONVERGED -> LOCAL_RECONCILIATION -> IMPLEMENTING
-                                                               |
-                                                          VERIFIED -> CLOSED
-```
+PREPARED -> WAIT_MANUAL_TRANSFER or PRO_PENDING -> PRO_READY -> CLAUDE_PENDING -> PRO_REVIEW_PENDING -> continued reciprocal turns -> CONVERGED -> LOCAL_RECONCILIATION -> IMPLEMENTING -> VERIFIED -> CLOSED.
 
-`CONVERGENCE_CHECK` is a local evaluation, not an extra model role. If it fails, the next actor addresses specific gaps; final approval-only turns may be needed after a content freeze. A `REVISE` or `BLOCKED` verdict does not converge. A new material local difference reopens `PRO_REVIEW_PENDING` in the same case/chat.
+WAIT_PERMISSION, WAIT_CAPABILITY, WAIT_ENVIRONMENT, WAIT_HUMAN, PAUSED and CANCELLED are explicit states. A paused case records the exact next actor and reuses the same Pro chat. It is never labelled converged merely because a budget or tool stopped.
 
-Every active state can pause as `WAIT_CAPABILITY`, `WAIT_ENVIRONMENT`, `WAIT_HUMAN` or `PAUSED`, storing a resumable prior state and next action. Invalid transitions are rejected. Budgets apply to actual completed turns/rounds, not UI polling. A six-round cap per run is a checkpoint boundary, not permission to implement an unapproved draft.
+The case's selected Claude model is fixed within review_epoch. A deliberate participant change increments the epoch and removes current approval eligibility, but preserves previous immutable turns and all unresolved findings. Fresh challenge/response and matching approvals are required. Local material changes reopen a focused review round.
 
-## Write-before-act and reconciliation
+## Recovery
 
-Before each external side effect, commit an outbox record locally: unique operation ID, case/turn, allowed destination, expected input hashes, state version, next action. Acquire the local lease. After the action verify the externally observed result and commit its receipt plus the state transition in one local transaction. A crash between side effect and receipt must reconcile externally before retrying.
+Persist intent before submission and receipt after actual readback. On restart verify task/case/session and current Git revision, reconcile uncertain sends, invalidate effort leases and resume only the matching operation. Do not use the most recent global chat/job. Keep one coordinator and serialized write windows. Historical receipts cannot approve new requirements, evidence, solution content or participant identity.
 
-For Git, validate branch parent and changed paths and use normal non-force updates. For browser messages, use an opaque turn marker and inspect the bound conversation. Neither an outbox nor a marker alone guarantees exactly-once delivery. Ambiguous observations pause instead of duplicating a submission.
-
-## Persistent invariants
-
-Task and case IDs are immutable. A bound Pro conversation cannot silently change. Counters are monotonic within an attempt series and their cumulative values survive resumes. Approval records reference immutable input/output content. Both actual participant identities and durable outputs must be validated before their verdicts count. Run state cannot be overwritten by instructions in repository content.
+The schemas define records; reference code validates observations. Actual state persistence, locking and side effects remain host integration work, not proof supplied by a JSON state label.

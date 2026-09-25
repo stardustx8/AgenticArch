@@ -1,41 +1,35 @@
 # Current session handoff
 
-Updated: 2026-09-24. Status: initial GitHub development baseline.
+Updated 2026-09-25. Prepared from 8b96744 and reconciled with concurrent commits through 294ebcb0 before publication. This revision implements the owner-authorized CLM, dual-harness, peer-model and subscription-efficiency changes in the implementation kit.
 
-## Project purpose
+## Current requirements
 
-Build an evidence-driven local orchestration layer around the owner's custom Codex, which can use local and remote models on the AI workstation. Keep the system small, preserve existing integrations and use SemIf for bounded decision support beyond model routing. This repository contains the full reusable implementation context; no preceding chat is required to understand its requirements or plan.
+Local CLM replaces the former decision backend. Luna low/high only; Astra high and Opus 5.5 medium/high are medium-tier peers. Deep work uses GPT-6 Pro web plus Fable 5.1 high or Opus 5.5 high. Fable 5.5 remains pending. Remote work is subscription-only with no API/paid-overflow fallback. Both harness packages share one core on main.
 
-## Non-negotiable owner choices
+## Added and changed
 
-Luna uses low/high only. Medium-tough work uses Astra high. Tough work, architecture and research use GPT-6 Pro in ChatGPT web through `prepare-sol-pro-architecture-review`. After Pro's durable initial contribution, `fable-adversarial-review` coordinates actual Pro/Fable challenge through `GPT-Pro-Escalation`. Every Pro continuation uses the same case chat. Both participants approve the same solution digest; the original local Codex session then implements with explicit local-context reconciliation. See [R01–R23](OWNER-REQUIREMENTS.md) for the complete requirements and acceptance mapping.
+Versioned model/evidence catalogs and CLM-suitable decision templates; strict loopback CLM wire client and tokenizer/deployment checks; qualified route filtering; bounded generation leases and applied-setting acknowledgments; subscription quota attribution; selectable reviewer identity and review epochs; both harness packages with checkpoint/Pi adapter contracts; directly revised exact-name skills; updated requirements, implementation instructions and acceptance records.
 
-## What exists now
+The research distinguishes primary benchmark scope, mixed efforts/fallbacks, firsthand editorial limits and owner policy. Native Pi and delegated workers are not conflated. The accessible editorial summaries were read; no unseen full video or unavailable local benchmark is claimed.
 
-The initial kit contains normative documentation, a four-lane policy, nine shadow-mode semantic operators, JSON schemas, synthetic examples, pure Python reference helpers, case/review templates, a master implementation prompt and both directly revised skill trees with an installer. Publication adds this handoff, a repository entry point and a durable decision log. The earlier local archive/bundle is a historical transfer copy; future work should start from the latest GitHub checkout.
+## Verified scope
 
-Both skill definitions are supplied under their exact names. They have not been installed into the owner's actual custom Codex, and any additional local helpers have not been inspected.
+See VALIDATION-REPORT for exact offline results. Python tests and the Pi structural fixture exercise reference logic, not installed model inference or provider billing. No actual workstation installation, native checkpoint acceptance, native Pi subscription qualification, independent Pro/Claude review or measured quota saving has occurred.
 
-## Verified and unverified
+## Concurrent work preserved
 
-Offline checks rerun during publication preparation on Linux / Python 3.13.5: **93 unit tests passed**, kit checks passed, and the synthetic decision-plane demo passed. The original 66-file source ZIP and local bundle were byte-for-byte consistent before adding the GitHub handoff. Remote publication must be verified against the branch/tree actually returned by GitHub; do not infer it from a local artifact.
+Commits 29f554b and f3538855 added a revision ledger and a generic CLM client with 13 tests. Preserve that API through `reference.clm` compatibility exports and its unchanged implementation/tests. The canonical requirement IDs and revision-local IDs are explicitly mapped in REVISION-2026-09-25.md. The integrated suite has 189 passing Python tests, including 25 concurrent routing tests whose only edit is the versioned fixture path. Do not discard the compatibility API or assume it provides live deployment supervision by itself.
 
-Live Codex dispatch, installed SemIf inference/calibration, real Pro/Fable conversations, runtime state/recovery, local skill migration, target-project tests and end-to-end implementation remain **NOT_RUN**. No independent Pro/Fable review of this kit has been performed. No CI workflow has been configured by this publication.
+The subsequent concurrent commit 10592526 added six research/profile documents, all retained. Commit 294ebcb0 adds the retained v1 routing/compiler work. Read INTEGRATION-RECONCILIATION.md for active versus compatibility contracts and registry/profile mappings.
 
 ## Open gates
 
-The kit records an unresolved capability/permission gate for automatic ChatGPT web operation and defaults to the manual ZIP/prompt route. Preserve that gate and its dated primary-source references; do not treat a custom client as proof of permission or silently substitute an API model. Revalidate the cited official guidance before attempting to qualify a future transport.
+Automatic Pro web submission remains unqualified under current official Computer Use guidance; keep manual same-chat transfers. The separate GPT-Pro-Escalation runtime repo has not been provisioned by this revision. Actual local paths/helpers, supported subscription model access, provider observers, cache/compaction and cancellation must be discovered and tested privately. No license decision or new paid service is introduced.
 
-The separate `GPT-Pro-Escalation` runtime repository has not been created or provisioned by this publication. Use the supplied template only after resolving its exact owner, visibility and access within authorization. No real review case or private context is published here.
+## Next concrete session
 
-Actual model identifiers, local paths, provider interfaces and installed helper behavior must be discovered privately on the workstation. No repository license has been selected. These are explicit remaining decisions, not reasons to delay already-specified mechanical work.
+Read START-HERE and the implementation prompt, then run offline checks. On the workstation perform Phase 0 read-only discovery and choose the initial Codex or Pi package without discarding the other. Bind one real subscription worker and actual verification first; then CLM shadow mode, adaptive effort and expanded deep-review receipts. Commit only sanitized capability evidence. Do not substitute another architecture essay for implementing specified interfaces.
 
-## Next session: concrete starting task
+## Closeout
 
-Read [the implementation prompt](../prompts/IMPLEMENT-AGENTICARCH.md) and the linked specifications. Run the offline checks. Then execute Phase 0 of [the implementation plan](IMPLEMENTATION-PLAN.md): read-only inventory of the actual custom Codex, skill trees, SemIf, model bindings, Git access and working tree. Keep sensitive results private; commit only a sanitized capability/status summary.
-
-After discovery, implement the specified Phase 1 local loop in small tested increments. Do not replace this handoff with another architecture essay. New consequential design decisions still go to the required Pro/Fable workflow, using the manual handoff while automated transport remains unqualified.
-
-## Session closeout contract
-
-Update this file, implementation status and any affected decisions together with code changes. State the task, branch, observed base revision, changed components, exact commands/results, live-versus-mock evidence, remaining gates and next concrete action. Never claim a running background job or a completed remote operation without its verified state. Preserve concurrent session work and refresh the remote before integration.
+Refresh main and preserve other sessions. Update this handoff, status and affected decisions with actual changes, commands/results, live-versus-fixture evidence, blockers and next action. Read back publication; never infer it from permission metadata or an unreferenced Git object.

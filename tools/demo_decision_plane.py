@@ -41,7 +41,7 @@ def main() -> int:
             'diagnostic_menu': ['inspect_contract', 'reproduce_failure', 'inspect_recent_change'],
         }, 'inspect_contract'),
     ]
-    result = {'warning': 'SYNTHETIC scores only. No SemIf inference or project test was run.',
+    result = {'warning': 'SYNTHETIC scores only. No CLM inference or project test was run.',
               'records': []}
     for operator_id, event, state, selected in examples:
         request = make_request(operators[operator_id], state, context, event=event)

@@ -7,7 +7,7 @@ from reference.routing import (Boundary, Capability, Task, accept_effort, compil
     compile_route, eligible, lease_valid, quota_delta, resolve_route, validate_catalog)
 
 ROOT = Path(__file__).resolve().parents[1]
-CAT = json.loads((ROOT / 'config/model-routing.json').read_text())
+CAT = json.loads((ROOT / 'config/compat/model-routing-v1.json').read_text())
 P = dict(encoder_revision='encoder', tokenizer_revision='tokenizer', head_sha256='a'*64,
          pooling='last-token', runtime_revision='runtime', renderer_version='v1')
 

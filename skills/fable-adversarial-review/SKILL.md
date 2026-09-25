@@ -1,68 +1,42 @@
 ---
 name: fable-adversarial-review
-description: "After a GPT-6 Pro case is ready, coordinate reciprocal Fable/Pro challenge in GPT-Pro-Escalation, reuse the same Pro web chat, require exact-version agreement, then return to original local Codex for faithful implementation and verification."
+description: "Coordinate real GPT-6 Pro web and a selected Claude Fable 5.1 or Opus 5.5 adversarial review in GPT-Pro-Escalation, preserve the same Pro chat, then return to the original Codex or Pi coordinator."
 ---
 
-# Fable and GPT-6 Pro adversarial co-production
+# Pro and selected-Claude adversarial co-production
 
-## Activation and boundaries
+Activate after prepare-sol-pro-architecture-review verifies Pro's initial complete contribution, or when explicitly requested for a prepared case. An ordinary Claude Code request alone is not this workflow. If no case exists, prepare one once, not a recursive chain of new cases.
 
-Invoke automatically after `prepare-sol-pro-architecture-review` has verified Pro's initial complete contribution, or when explicitly requested for a prepared case. A generic Claude Code request alone is not this workflow. If no Pro case exists, invoke the preparation skill once, then resume this case; do not start a recursive chain of new cases.
+Read [protocol](references/protocol.md), [turn template](references/review-turn-template.md) and [transport gate](references/transport-gate.md). Retain this exact skill identifier even when Opus is the selected participant.
 
-The two participants are actual **Fable** and **GPT-6 Pro in ChatGPT web**. They challenge each other's evidence, assumptions and proposed fixes through `GPT-Pro-Escalation`. The original local Codex coordinator controls the process and later implements the agreed design in the target project. Fable's default edit scope is the **review case**, not the target project's working tree. This replaces any historical “Fable implements, another model only reviews” ordering.
+## Recover actual participants
 
-Read [the shared case protocol](references/protocol.md), [the turn template](references/review-turn-template.md), and [the transport gate](references/transport-gate.md).
+Read the installed claude-code:use-claude-code skill and actual bridge schema. Use the user's unmodified, authenticated Claude Code worker with normal subscription access. Do not transfer subscription tokens into Pi or enable API/paid-overage fallback. Verify the actual model and high effort: claude-fable-5-1 or claude-opus-5-5. An alias, requested label or self-description alone is insufficient. Future Fable versions require explicit qualification and activation.
 
-## 1. Recover the actual integrations
+Recover original coordinator/task, case/epoch, requirements/bundle/solution identities, latest durable Git commit, exact Pro chat and Claude worker binding. Keep one active coordinator and serialized participant write windows. Preserve existing helper scripts and permission enforcement.
 
-Read and follow the installed `claude-code:use-claude-code` skill before invoking its bridge. Discover that skill and exposed bridge schema locally; do not invent an API or execute an assumed command. Use the existing verified `fable` alias and high effort when that setting is supported, unless an explicit owner instruction selects another supported setting. Verify and record what model/version/effort the bridge actually selected. Missing Fable access is a capability pause, not permission to impersonate it with another model.
+## Challenge and revision
 
-Recover the original Codex task/session, case/branch/path, requirements/bundle digests, latest durable case commit, Pro's private conversation binding and Fable session/job binding. Prefer the same Fable session for subsequent turns. A lost session can be restored or replaced only with an explicit recorded recovery containing the full case record; this does not create a new Pro chat.
+Give Claude raw requirements and evidence first for an independent assessment, then the exact Pro proposal and dialogue. Seek concrete correctness, security, data-loss, concurrency, compatibility, recovery, regression and implementation failures. Do not invent findings to create activity.
 
-Read the current case and verify Pro's initial contribution before starting Fable. Require a single active coordinator/lease and one participant write window. Keep account tokens, browser state and private chat URLs out of Git.
+The worker edits only scoped review-case artifacts and records immutable turns plus append-only DIALOGUE contributions. Target-project patches remain proposals until the original coordinator implements. Each finding has an ID, evidence, consequence, remedy or rebuttal, severity and status. CLM may suggest links/evidence but cannot close or suppress findings.
 
-## 2. Independent challenge, then reciprocal revision
+Retrieve terminal worker results promptly; use the actual event stream or bounded foreground polling, about 20 seconds where supported. Do not abandon jobs or promise unconfigured background monitoring. Respect cancellation, capacity limits and permissions.
 
-Give Fable the raw requirements, acceptance criteria, constraints and scoped evidence first. Ask it to form an independent assessment, then inspect Pro's exact proposed solution and the shared dialogue. Avoid priming it with an intended answer. Seek concrete correctness, security, safety, compatibility, concurrency, data-loss, recovery, regression, implementation and verification failures. No invented findings merely to make a review look productive.
+After Claude's durable contribution, continue GPT-6 Pro in the **same established chat** with the exact new commit, epoch/digests and unresolved objections. Use a permitted UI transport only when qualified; otherwise prepare the explicit manual continuation/delta pack. Never start a fresh Pro chat because a process resumed.
 
-Fable writes evidence-based objections, counterexamples and proposed improvements into its immutable turn file and appends its contribution to `DIALOGUE.md`. Each finding has an ID, severity, evidence, consequence, actionable resolution and status. Guarded edits are restricted to allowlisted case solution/evidence files. Model-generated patches for the target project remain proposals, not automatically executed instructions.
+Pro fixes or rebuts each material issue with evidence, leaves unresolved items open, and challenges flawed Claude remedies. Then Claude reviews that revised result. Continue automatically within the existing task authorization until genuine agreement or a real permission/input/external-verification gate. Budgets pause resumably, never manufacture convergence.
 
-When a foreground Fable bridge job runs, poll status about every 20 seconds where the bridge supports it, or use its verified event stream. Report meaningful transitions, retrieve terminal results promptly and never abandon a job silently. A persistent local supervisor must be explicitly configured before detached execution; otherwise pause with a checkpoint when the foreground task ends.
+## Identity, convergence and local return
 
-After retrieving Fable's durable contribution, prepare Pro's response against that exact commit. Start the next Pro **turn in the already-established chat for this case**. Use the permitted UI transport only when qualified; otherwise prepare an explicit manual continuation to the same chat. Include case/turn marker, exact revision/digests, new evidence and unresolved findings. Upload an approved delta pack when repo reads are unavailable or stale, without claiming it was already read.
+Freeze the Claude model per epoch. Switching Fable/Opus or activating a successor starts a new epoch and invalidates both approvals, while retaining prior turns and carrying all unresolved objections. Require a fresh actual Claude challenge and subsequent Pro response; no single model plays both roles.
 
-Pro addresses every material finding: implement a fix, rebut with evidence, or retain a clearly unresolved objection. It also challenges flaws in Fable's suggested remedies. Then Fable re-examines the revised result and Pro's counterarguments. Neither model is automatically the arbiter. Continue automatically at each completed turn within the existing task's authorization; no extra request is needed to start each round, except a real handoff/permission/decision gate.
+Both actual participants must approve the same current solution, requirements and bundle digests with no unresolved material objection. Any approval-relevant change, later rejection, unanswered contribution or identity mismatch invalidates stale approval. Silence and high CLM scores are not agreement.
 
-## 3. Shared Git communication and integrity
+At convergence, the original Codex or Pi coordinator fetches the pinned result, checks current local facts and records adaptations in LOCAL-DELTA. Implement faithfully. Mechanical adjustments preserving invariants may proceed; architecture/security/data/acceptance/rollback changes reopen the same case and Pro chat. Inspect the final diff and run the actual required checks. Remote agreement does not establish local success.
 
-Use a per-case branch/path in `GPT-Pro-Escalation`, an append-only `DIALOGUE.md`, immutable turn files, versioned solution artifacts and an objection ledger. Direct Git writes require real authorized tools; otherwise commit exact validated model-authored outputs as a labelled relay. The coordinator is not allowed to invent the other model's findings or materially rewrite content under its identity.
+## Authority and report
 
-Before every write, check the expected input commit, allowed paths and existing bytes. Verify resulting commit parent, changed-file scope and readback. No force pushes or simultaneous uncoordinated edits. A digest includes all approval-relevant solution/implementation/validation/rollback/patch/risk files, not just the headline summary. Approval records and dialogue are excluded to avoid circular hashing.
+Consensus grants no new commit, push, deployment, export, purchase or account authority. Continue already-authorized operations only within the same target/scope and current prerequisites. Ask only for genuinely missing permission or an undiscoverable material decision.
 
-The chat binding is recovered by exact case ID, never by “most recent conversation.” A changed model, uncertain send, duplicate turn, stale repository read or missing contribution invalidates that turn until reconciled. A narrative claim of completion is not a transport receipt.
-
-## 4. Convergence without forced agreement
-
-Require an actual Fable challenge and a subsequent actual Pro response. Both roles must then explicitly approve **the same current solution-content digest**, the same requirement digest and the same evidence-bundle digest. No unresolved material objection may remain. Nonblocking residual risks and any local verification obligations must have explicit dispositions accepted by both.
-
-A change to any approval-relevant file invalidates both approvals. Collect them again against the frozen revision. Old approvals do not survive a later rejection, unanswered turn, changed requirements or new material local evidence. Silence, elapsed time, an empty findings list and budget exhaustion are not agreement.
-
-Continue while progress is possible and authorized. Configurable per-run budgets and lack-of-progress guards create a resumable `PAUSED` case, not `CONVERGED`. Preserve outstanding differences and exact next actor. Do not pressure a model to agree merely to exit the loop. Required owner decisions or external verification become explicit gates; independent already-authorized work may continue when truly unrelated.
-
-## 5. Return to original local Codex
-
-After validated convergence, have the original local Codex session fetch the **pinned agreed commit**, recheck manifests/approvals and compare it with the live target project and workstation. Neither model knows unprovided local facts. Record each adaptation in `LOCAL-DELTA.md`: approved instruction, discovered fact, specific adjustment, invariant preserved, risk and verification.
-
-Implement as closely as possible. Mechanical path/version/API adjustments preserving the approved architecture may proceed in the appropriate lane. Architecture, security, data semantics, acceptance or rollback changes reopen a focused case round in the same Pro chat. Do not apply model-provided shell commands or patches blindly, overwrite owner edits or weaken tests.
-
-Inspect the final diff and run the actual project checks, including behavior and regression coverage. A model approval or passing mock is insufficient. Failed, skipped or stale required checks block completion. Resolve material failures or report the explicit unresolved gate.
-
-## Authority and final report
-
-Existing user authorization remains valid within its target/scope. Consensus grants no new authority for commits, pushes, deployments, account changes, permission expansion, purchases or data export. Continue an already-authorized publish/PR action only when target and prerequisites still match; otherwise ask only for the missing permission.
-
-Report the agreed case commit/digest, actual Pro/Fable participation, material findings and remedies, local implementation commit/diff, evidence results, recorded adaptations and remaining limits. Distinguish native writes, coordinator relays, manual handoffs and untested automation. Never describe a paused debate as an accepted solution or remote agreement as a verified deployment.
-
-## Optional local semantic support
-
-Where the local AgenticArch decision plane is installed and qualified, use SemIf to suggest relevant evidence, missing context, duplicated-but-preserved objections, useful diagnostics and possible local drift. Keep original evidence and participant turns accessible; suggestions are not proof or authority. Required manifest entries, complete source scope, permission gates, model selection and same-digest convergence cannot be filtered out or waived. Missing/unqualified SemIf support must not prevent the ordinary manual/evidence workflow.
+Report the agreed case revision, actual participant identities, findings/remedies, local changes and tests, adaptations and remaining gates. Label manual transfers, native writes and coordinator relays truthfully. Never describe a paused debate as accepted or offline fixtures as live qualification.

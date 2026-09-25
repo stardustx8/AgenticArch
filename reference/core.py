@@ -19,11 +19,15 @@ class Lane(str, Enum):
     LUNA_LOW = 'luna_low'
     LUNA_HIGH = 'luna_high'
     ASTRA_HIGH = 'astra_high'
+    OPUS_MEDIUM = 'opus_medium'
+    OPUS_HIGH = 'opus_high'
     PRO_WEB = 'pro_web'
 
 
 LANES = tuple(Lane)
-FLOORS = dict(zip(('routine', 'bounded', 'medium_tough', 'tough'), LANES))
+TIERS = dict(zip(LANES, (0, 1, 2, 2, 2, 3)))
+FLOORS = dict(zip(('routine', 'bounded', 'medium_tough', 'tough'),
+                  (Lane.LUNA_LOW, Lane.LUNA_HIGH, Lane.ASTRA_HIGH, Lane.PRO_WEB)))
 PRO_CATEGORIES = frozenset({
     'architecture', 'research', 'security_design', 'migration_design',
     'irreversible_change_design',
@@ -41,6 +45,8 @@ def validate_lane(model_family: str, reasoning: str | None) -> Lane:
         ('GPT-6 Luna', 'low'): Lane.LUNA_LOW,
         ('GPT-6 Luna', 'high'): Lane.LUNA_HIGH,
         ('GPT-6 Astra', 'high'): Lane.ASTRA_HIGH,
+        ('Claude Opus 5.5', 'medium'): Lane.OPUS_MEDIUM,
+        ('Claude Opus 5.5', 'high'): Lane.OPUS_HIGH,
         ('GPT-6 Pro', None): Lane.PRO_WEB,
     }
     try:
@@ -50,10 +56,10 @@ def validate_lane(model_family: str, reasoning: str | None) -> Lane:
 
 
 def validate_policy(policy: Mapping[str, Any]) -> None:
-    if type(policy.get('schema_version')) is not int or policy['schema_version'] != 1:
+    if type(policy.get('schema_version')) is not int or policy['schema_version'] != 2:
         raise ValueError('Unsupported policy schema')
     if set(policy.get('lanes', {})) != {lane.value for lane in LANES}:
-        raise ValueError('Policy must declare exactly the four lanes')
+        raise ValueError('Policy must declare exactly the six allowed model/effort lanes')
     for name, spec in policy['lanes'].items():
         if validate_lane(spec['model_family'], spec['reasoning']).value != name:
             raise ValueError('Lane name does not match model/effort')
@@ -61,19 +67,22 @@ def validate_policy(policy: Mapping[str, Any]) -> None:
     if pro.get('transport') != 'chatgpt_web' or pro.get('skill') != 'prepare-sol-pro-architecture-review':
         raise ValueError('Pro must use prepare-sol-pro-architecture-review and ChatGPT web')
     if policy.get('complexity_floor') != {k: v.value for k, v in FLOORS.items()}:
-        raise ValueError('Complexity floors must match the four-lane policy')
+        raise ValueError('Complexity floors must match the tier policy')
     if set(policy.get('mandatory_pro_categories', [])) != PRO_CATEGORIES:
         raise ValueError('Mandatory Pro categories must not be weakened')
     for key in ('max_passes_per_lane', 'max_coding_passes', 'max_no_progress_passes'):
         if type(policy.get(key)) is not int or policy[key] < 1:
             raise ValueError(f'{key} must be a positive integer')
-    semif = policy.get('semif', {})
-    if semif.get('mode') not in {'shadow', 'advisory'}:
-        raise ValueError('Unsupported SemIf mode')
-    if (semif.get('local_only') is not True or
-            semif.get('can_lower_floor') is not False or
-            semif.get('can_authorize_completion') is not False):
-        raise ValueError('SemIf authority must remain bounded and local')
+    clm = policy.get('clm', {})
+    if clm.get('mode') not in {'shadow', 'advisory'}:
+        raise ValueError('Unsupported CLM mode')
+    if (clm.get('local_only') is not True or
+            clm.get('can_lower_floor') is not False or
+            clm.get('can_authorize_completion') is not False):
+        raise ValueError('CLM authority must remain bounded and local')
+    billing = policy.get('billing', {})
+    if billing.get('remote_mode') != 'subscription_only' or billing.get('api_fallback') is not False:
+        raise ValueError('Remote execution must not silently use API credits')
     verification = policy.get('verification', {})
     if any(verification.get(k) is not True for k in (
         'nonempty_required_checks', 'same_snapshot_and_plan', 'all_observed_failures_block'
@@ -81,11 +90,25 @@ def validate_policy(policy: Mapping[str, Any]) -> None:
         raise ValueError('Verification guards cannot be disabled')
     debate = policy.get('debate', {})
     if (debate.get('review_repository_name') != 'GPT-Pro-Escalation' or
-            set(debate.get('required_roles', [])) != {'pro', 'fable'} or
+            set(debate.get('required_roles', [])) != {'pro', 'claude'} or
             debate.get('same_chat_for_pro') is not True or
             debate.get('matching_solution_digests') is not True or
             debate.get('on_budget_exhausted') != 'PAUSED'):
         raise ValueError('Invalid debate policy')
+    if (set(debate.get('claude_models', [])) != {'claude-fable-5-1', 'claude-opus-5-5'} or
+            debate.get('participant_change_invalidates_approvals') is not True):
+        raise ValueError('Claude participant identity must be pinned and approvals invalidated on change')
+    if policy.get('tier_peers', {}).get('medium_tough') != ['astra_high', 'opus_medium', 'opus_high']:
+        raise ValueError('Medium-tough peers must remain explicit')
+    if billing.get('api_to_quota_conversion') is not False:
+        raise ValueError('API prices cannot be converted into subscription quota')
+    effort = policy.get('effort', {})
+    if (effort.get('lease_generations') != [1, 2, 5, 10] or
+            type(effort.get('default_lease')) is not int or
+            effort['default_lease'] not in effort['lease_generations'] or
+            any(effort.get(key) is not True for key in ('apply_only_at_generation_boundary',
+                'effective_setting_readback_required', 'manual_override_wins'))):
+        raise ValueError('Effort changes require bounded leases and effective-setting acknowledgment')
     if debate.get('skill') != 'fable-adversarial-review':
         raise ValueError('The exact Fable skill identifier is required')
     transport = policy.get('pro_transport', {})
@@ -119,14 +142,14 @@ def route(complexity: str, categories: Sequence[str] = (), *,
     if categories:
         floor = Lane.PRO_WEB
     elif not risk_assessed:
-        floor = LANES[max(LANES.index(floor), LANES.index(Lane.ASTRA_HIGH))]
+        floor = max((floor, Lane.ASTRA_HIGH), key=TIERS.__getitem__)
     candidates = [floor]
     for candidate in (current, advice):
         if candidate is not None:
             if not isinstance(candidate, Lane):
                 raise ValueError('Invalid lane')
             candidates.append(candidate)
-    selected = max(candidates, key=LANES.index)
+    selected = max(enumerate(candidates), key=lambda pair: (TIERS[pair[1]], pair[0]))[1]
     return Routing(selected, not risk_assessed)
 
 
@@ -152,7 +175,8 @@ def after_failure(lane: Lane, *, lane_passes: int, total_passes: int,
     if (lane_passes >= policy['max_passes_per_lane'] or
             no_progress_passes >= policy['max_no_progress_passes'] or
             not has_hypothesis):
-        return 'ESCALATE', LANES[LANES.index(lane) + 1]
+        next_tier = TIERS[lane] + 1
+        return 'ESCALATE', next(x for x in LANES if TIERS[x] == next_tier)
     return 'RETRY', lane
 
 
@@ -211,7 +235,7 @@ def validate_advice(data: Mapping[str, Any], *, request_id: str, state_digest: s
     best = max(scores.values())
     ties = [key for key in expected if abs(scores[key] - best) <= 1e-12]
     if set(expected) <= {lane.value for lane in LANES}:
-        selected = max(ties, key=lambda key: LANES.index(Lane(key)))
+        selected = max(ties, key=lambda key: TIERS[Lane(key)])
     else:
         selected = ties[0]
     if data.get('selected') != selected:
@@ -224,10 +248,12 @@ class Receipt:
     receipt_id: str
     case_id: str
     role: str
-    phase: str  # fable_challenge, pro_response, initial, or review
+    phase: str  # claude_challenge, pro_response, initial, or review
     sequence: int  # Assigned by the coordinator, never a model-supplied timestamp.
     identity_verified: bool
     durable_output_verified: bool
+    model_id: str = ""  # Observed product/model identity, not the requested alias.
+    review_epoch: int = 1
 
 
 @dataclass(frozen=True)
@@ -252,10 +278,21 @@ class CaseReview:
     manifest_verified: bool = False
     evidence_references_verified: bool = False
     required_deliverables_present: bool = False
+    claude_model_id: str = ""  # Explicit frozen participant for this case.
+    review_epoch: int = 1
 
 
 def convergence_errors(case: CaseReview) -> list[str]:
     errors: list[str] = []
+    if case.claude_model_id not in {'claude-fable-5-1', 'claude-opus-5-5'}:
+        errors.append('invalid_claude_participant')
+    if any(r.model_id != ('gpt-6-pro-web' if r.role == 'pro' else case.claude_model_id)
+           for r in case.receipts if r.review_epoch == case.review_epoch):
+        errors.append('participant_model_mismatch')
+    if type(case.review_epoch) is not int or case.review_epoch < 1 or any(
+            type(r.review_epoch) is not int or not 1 <= r.review_epoch <= case.review_epoch
+            for r in case.receipts):
+        errors.append('invalid_review_epoch')
     if not case.case_id or not all(_digest(value) for value in (
         case.solution_digest, case.requirements_digest, case.bundle_digest
     )):
@@ -273,10 +310,11 @@ def convergence_errors(case: CaseReview) -> list[str]:
             any(type(n) is not int or n < 1 for n in sequences)):
         errors.append('invalid_receipt_sequence')
     valid = [r for r in case.receipts if (
-        r.receipt_id and r.case_id == case.case_id and r.role in {'pro', 'fable'} and
-        r.identity_verified is True and r.durable_output_verified is True
+        r.review_epoch == case.review_epoch and r.receipt_id and r.case_id == case.case_id and r.role in {'pro', 'claude'} and
+        r.identity_verified is True and r.durable_output_verified is True and
+        r.model_id == ('gpt-6-pro-web' if r.role == 'pro' else case.claude_model_id)
     )]
-    challenges = [r.sequence for r in valid if r.role == 'fable' and r.phase == 'fable_challenge']
+    challenges = [r.sequence for r in valid if r.role == 'claude' and r.phase == 'claude_challenge']
     responses = [r.sequence for r in valid if r.role == 'pro' and r.phase == 'pro_response']
     valid_responses = [b for b in responses if any(a < b for a in challenges)]
     if not valid_responses:
@@ -285,6 +323,8 @@ def convergence_errors(case: CaseReview) -> list[str]:
     used_receipts: set[str] = set()
     for review in case.reviews:
         receipt = receipts.get(review.receipt_id)
+        if receipt is not None and receipt.review_epoch < case.review_epoch:
+            continue  # Keep historical turns; they cannot approve the current epoch.
         if (receipt is None or receipt not in valid or receipt.role != review.role or
                 review.verdict not in {'APPROVE', 'REVISE', 'BLOCKED'}):
             errors.append('invalid_review_receipt_or_verdict')
@@ -294,7 +334,7 @@ def convergence_errors(case: CaseReview) -> list[str]:
         used_receipts.add(review.receipt_id)
         if receipt.sequence > latest.get(review.role, (-1, review))[0]:
             latest[review.role] = (receipt.sequence, review)
-    for role in ('pro', 'fable'):
+    for role in ('pro', 'claude'):
         if role not in latest:
             errors.append(f'missing_{role}_review')
             continue

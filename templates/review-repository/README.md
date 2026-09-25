@@ -1,6 +1,6 @@
 # GPT-Pro-Escalation
 
-A dedicated workspace for versioned GPT-6 Pro/Fable review cases. Keep real cases private and subject to the approved external-data policy. This repository is separate from AgenticArch and from the software being implemented.
+A dedicated workspace for versioned GPT-6 Pro/Claude review cases. Keep real cases private and subject to the approved external-data policy. This repository is separate from AgenticArch and from the software being implemented.
 
 Use branch `case/<case-id>` and directory `cases/<case-id>/` for each case. One coordinator owns a case; only one participant writes at a time. Communicate through the case's append-only `DIALOGUE.md` plus immutable turn records. Approve exact solution content digests, not a moving branch tip.
 

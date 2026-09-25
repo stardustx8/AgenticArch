@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "lanes": {
     "luna_low": {
       "model_family": "GPT-6 Luna",
@@ -18,6 +18,14 @@
       "reasoning": null,
       "transport": "chatgpt_web",
       "skill": "prepare-sol-pro-architecture-review"
+    },
+    "opus_medium": {
+      "model_family": "Claude Opus 5.5",
+      "reasoning": "medium"
+    },
+    "opus_high": {
+      "model_family": "Claude Opus 5.5",
+      "reasoning": "high"
     }
   },
   "complexity_floor": {
@@ -40,16 +48,21 @@
     "review_repository_name": "GPT-Pro-Escalation",
     "required_roles": [
       "pro",
-      "fable"
+      "claude"
     ],
     "same_chat_for_pro": true,
     "max_rounds_per_run": 6,
     "max_nonprogress_rounds": 2,
     "on_budget_exhausted": "PAUSED",
     "matching_solution_digests": true,
-    "skill": "fable-adversarial-review"
+    "skill": "fable-adversarial-review",
+    "claude_models": [
+      "claude-fable-5-1",
+      "claude-opus-5-5"
+    ],
+    "participant_change_invalidates_approvals": true
   },
-  "semif": {
+  "clm": {
     "mode": "shadow",
     "local_only": true,
     "can_lower_floor": false,
@@ -65,5 +78,30 @@
     "automatic_requires_permitted_capability": true,
     "no_restriction_bypass": true,
     "no_silent_model_substitution": true
+  },
+  "tier_peers": {
+    "medium_tough": [
+      "astra_high",
+      "opus_medium",
+      "opus_high"
+    ]
+  },
+  "billing": {
+    "remote_mode": "subscription_only",
+    "api_fallback": false,
+    "optimize": "verified_completions_per_observed_quota",
+    "api_to_quota_conversion": false
+  },
+  "effort": {
+    "lease_generations": [
+      1,
+      2,
+      5,
+      10
+    ],
+    "default_lease": 2,
+    "apply_only_at_generation_boundary": true,
+    "effective_setting_readback_required": true,
+    "manual_override_wins": true
   }
 }

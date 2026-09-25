@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-09-25",
+  "sources": {
+    "S01": {
+      "kind": "primary_study",
+      "title": "HarnessTax",
+      "url": "https://arena.ai/blog/coding-agents-harness-tax",
+      "source_date": "2026-09-18",
+      "scope": "21 model/harness pairs; 30 sampled tasks per benchmark, three runs per task; September 1 direct-API price list. No subscription-quota experiment."
+    },
+    "S02": {
+      "kind": "official",
+      "title": "Codex subscription usage",
+      "url": "https://developers.openai.com/codex/pricing/",
+      "source_date": "2026-09-25",
+      "scope": "Smaller prompts, AGENTS.md and tool context can extend included usage. Billing units are not a universal token-to-quota conversion."
+    },
+    "S03": {
+      "kind": "official",
+      "title": "Codex authentication",
+      "url": "https://developers.openai.com/codex/auth/",
+      "source_date": "2026-09-25",
+      "scope": "ChatGPT login and API-key billing are distinct. Verify actual login mode and disable paid spillover."
+    },
+    "S04": {
+      "kind": "official",
+      "title": "Claude Code usage accounting",
+      "url": "https://code.claude.com/docs/en/costs",
+      "source_date": "2026-09-25",
+      "scope": "API-equivalent dollar estimates are not subscription charges. Shared usage and delayed counters complicate attribution."
+    },
+    "S05": {
+      "kind": "official",
+      "title": "Claude Code credential boundaries",
+      "url": "https://code.claude.com/docs/en/legal-and-compliance",
+      "source_date": "2026-09-25",
+      "scope": "Use the user-authenticated unmodified Claude Code worker. Do not transfer Claude subscription tokens into a third-party provider implementation."
+    },
+    "S06": {
+      "kind": "vendor_benchmark",
+      "title": "Opus 5.5 launch",
+      "url": "https://www.anthropic.com/claude-opus-5-5",
+      "source_date": "2026-09-22",
+      "scope": "Mixed-effort vendor comparisons. Keep benchmark version, effort and fallback scope attached to each observation."
+    },
+    "S07": {
+      "kind": "official",
+      "title": "Opus 5.5 model specification",
+      "url": "https://platform.claude.com/docs/en/models/opus-5-5/overview",
+      "source_date": "2026-09-25",
+      "scope": "Exact identity claude-opus-5-5. Always-on adaptive thinking and model/conversation-specific thinking-block constraints."
+    },
+    "S08": {
+      "kind": "official",
+      "title": "Fable 5.1 model specification",
+      "url": "https://platform.claude.com/docs/en/models/fable-5-1/overview",
+      "source_date": "2026-09-25",
+      "scope": "Exact identity claude-fable-5-1; default high. Future Fable 5.5 activation is not established by this source."
+    },
+    "S09": {
+      "kind": "official",
+      "title": "Claude Code effort control",
+      "url": "https://code.claude.com/docs/en/model-config",
+      "source_date": "2026-09-25",
+      "scope": "Opus 5.5 defaults to medium, Fable 5.1 to high. Unsupported requests can clamp; effective settings require readback."
+    },
+    "S10": {
+      "kind": "vendor_benchmark",
+      "title": "GPT-6 Sol and Luna",
+      "url": "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+      "source_date": "2026-09-22",
+      "scope": "Luna max DeepSWE v1.1 66.6%; this does not measure high-effort quota efficiency or architectural review quality."
+    },
+    "S11": {
+      "kind": "official",
+      "title": "GPT-6 Luna specification",
+      "url": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+      "source_date": "2026-09-25",
+      "scope": "Platform supports more efforts than the owner allows. This project restricts Luna to low/high."
+    },
+    "S12": {
+      "kind": "official",
+      "title": "GPT-6 Astra",
+      "url": "https://openai.com/index/gpt-6-astra/",
+      "source_date": "2026-09-25",
+      "scope": "General capability evidence, not a measurement that Astra high dominates every backend task."
+    },
+    "S13": {
+      "kind": "official",
+      "title": "GPT-6 Pro in ChatGPT",
+      "url": "https://help.openai.com/en/articles/20001354-gpt-56-and-gpt-6-pro-in-chatgpt",
+      "source_date": "2026-09-25",
+      "scope": "Pro is a ChatGPT product experience powered by Astra. Product message limits differ from coding quota; detect model fallback."
+    },
+    "S14": {
+      "kind": "firsthand_editorial",
+      "title": "Claire Vo blind model workbench",
+      "url": "https://www.lennysnewsletter.com/p/opus-55-vs-gpt-6-sol-which-model",
+      "source_date": "2026-09-22",
+      "scope": "Qualitative support for testing Opus 5.5 on B2B frontend and long-running work; mixed results across creative tasks. Not a controlled quota study."
+    },
+    "S15": {
+      "kind": "firsthand_editorial",
+      "title": "Lisa Peyton newsletter comparison",
+      "url": "https://lisapeyton.com/gpt-6-astra-vs-claude-fable-5-1-marketing-newsletter-test/",
+      "source_date": "2026-09-16",
+      "scope": "One authored marketing comparison favors Fable style in several sections. No software or frontend correctness inference."
+    },
+    "S16": {
+      "kind": "independent_evaluation",
+      "title": "Artificial Analysis Opus 5.5",
+      "url": "https://artificialanalysis.ai/models/claude-opus-5-5",
+      "source_date": "2026-09-25",
+      "scope": "Published configuration is max with fallback. Do not transplant its aggregate result to medium/high or quota economics."
+    },
+    "S17": {
+      "kind": "primary_implementation",
+      "title": "CLM pinned implementation",
+      "url": "https://github.com/Contrastive-LM/CLM/tree/bb42c6c5bf914fd449bed2f6ca65be80602cb1f7",
+      "source_date": "2026-09-25",
+      "scope": "Contrastive state/action embeddings; typed choice endpoint. Context/question uses prose; scores are conditional on candidate descriptions."
+    },
+    "S18": {
+      "kind": "primary_implementation",
+      "title": "Pi pinned extension API",
+      "url": "https://github.com/earendil-works/pi/tree/49681e1b71c9c32cdfbf45c21f8e3cb3a8c8629d",
+      "source_date": "2026-09-25",
+      "scope": "Native model/thinking setters and lifecycle hooks exist. Effort can clamp; extension exceptions alone are not dispatch enforcement."
+    },
+    "S19": {
+      "kind": "primary_implementation",
+      "title": "Astra-Ares architecture",
+      "url": "https://github.com/miuuyy/Astra-Ares/blob/main/docs/architecture.md",
+      "source_date": "2026-09-25",
+      "scope": "Native pre-generation checkpoint, 1/2/5/10 generation leases, applied-setting acknowledgment. Long-session compaction and actual savings need qualification."
+    },
+    "S20": {
+      "kind": "official",
+      "title": "Reasoning changes within a conversation",
+      "url": "https://developers.openai.com/api/docs/guides/reasoning#change-reasoning-mid-conversation",
+      "source_date": "2026-09-25",
+      "scope": "Native configuration updates are not equivalent to editing the initial prompt. Cache preservation has endpoint and lifecycle constraints."
+    },
+    "S21": {
+      "kind": "official",
+      "title": "Computer Use boundary",
+      "url": "https://developers.openai.com/codex/computer-use/",
+      "source_date": "2026-09-25",
+      "scope": "Current feature excludes automating ChatGPT itself. Keep manual Pro handoff; do not introduce a bypass."
+    },
+    "OWNER": {
+      "kind": "owner_requirement",
+      "title": "Owner model and workflow policy",
+      "url": null,
+      "source_date": "2026-09-25",
+      "scope": "Authorizes model alternatives, local CLM, subscription-only execution, two harness profiles and direct publication on main."
+    }
+  },
+  "comparisons": [
+    {
+      "source": "S01",
+      "benchmark": "SWE-bench Lite",
+      "sample_tasks": 30,
+      "repeats": 3,
+      "model": "Claude Fable 5",
+      "rows": [
+        {
+          "harness": "Claude Code",
+          "score_percent": 97.8,
+          "api_usd_per_attempt": 1.33
+        },
+        {
+          "harness": "Pi",
+          "score_percent": 96.7,
+          "api_usd_per_attempt": 0.67
+        }
+      ],
+      "quota_measured": false
+    },
+    {
+      "source": "S01",
+      "benchmark": "Terminal-Bench 2.0",
+      "sample_tasks": 30,
+      "repeats": 3,
+      "model": "GPT-5.6 Sol",
+      "rows": [
+        {
+          "harness": "Pi",
+          "score_percent": 83.3,
+          "api_usd_per_attempt": 0.42
+        },
+        {
+          "harness": "Codex",
+          "score_percent": 78.9,
+          "api_usd_per_attempt": 0.76
+        }
+      ],
+      "quota_measured": false
+    },
+    {
+      "source": "S06",
+      "benchmark": "Terminal-Bench 4.0",
+      "rows": [
+        {
+          "model": "Claude Opus 5.5",
+          "effort": "xhigh",
+          "score_percent": 66.4
+        },
+        {
+          "model": "Claude Fable 5.1",
+          "effort": "not_stated_in_table",
+          "score_percent": 55.8
+        },
+        {
+          "model": "GPT-6 Astra",
+          "effort": "high",
+          "score_percent": 57.9
+        }
+      ],
+      "comparable_efforts": false,
+      "quota_measured": false,
+      "production_fallback": "Opus safeguards may route cybersecurity to Opus 4.8, biology/frontier development to Opus 5; not pure-model-only"
+    },
+    {
+      "source": "S06",
+      "benchmark": "Terminal-Bench Science 0.1",
+      "rows": [
+        {
+          "model": "Claude Opus 5.5",
+          "effort": "max",
+          "score_percent": 58.7
+        },
+        {
+          "model": "Claude Fable 5.1",
+          "effort": "not_stated_in_table",
+          "score_percent": 52.6
+        },
+        {
+          "model": "GPT-6 Astra",
+          "effort": "not_stated_in_table",
+          "score_percent": 64.6
+        }
+      ],
+      "comparable_efforts": false,
+      "quota_measured": false,
+      "production_fallback": "Opus safeguards may route cybersecurity to Opus 4.8, biology/frontier development to Opus 5; not pure-model-only"
+    },
+    {
+      "source": "S06",
+      "benchmark": "FrontierCode v1.1 Main",
+      "rows": [
+        {
+          "model": "Claude Opus 5.5",
+          "effort": "medium",
+          "score_percent": 54.6
+        },
+        {
+          "model": "GPT-6 Astra",
+          "effort": "reported_best",
+          "score_percent": 53.3
+        }
+      ],
+      "comparable_efforts": false,
+      "quota_measured": false
+    }
+  ],
+  "limits": [
+    "No controlled local subscription-efficiency frontier has been measured.",
+    "New releases have sparse exact-version firsthand editorial evidence.",
+    "No backend/frontend universal winner is established.",
+    "Higher efforts on the owner-supplied chart are not mathematically dominated merely because they cost more.",
+    "S01 measured older model versions and must not be relabelled as Opus 5.5 or GPT-6 evidence."
+  ]
+}

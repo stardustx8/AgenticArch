@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "revision": "2026-09-25.1",
+  "mode": "shadow",
+  "models": {
+    "luna": {"identity":"gpt-6-luna","provider_id":"gpt-6-luna","display":"GPT-6 Luna","efforts":["low","high"],"default":"high","status":"candidate","evidence":["luna_doc","luna_launch"]},
+    "astra": {"identity":"gpt-6-astra","provider_id":"gpt-6-astra","display":"GPT-6 Astra","efforts":["high"],"default":"high","status":"candidate","evidence":["astra_doc","astra_launch"]},
+    "opus55": {"identity":"claude-opus-5-5","provider_id":"claude-opus-5-5","display":"Claude Opus 5.5","efforts":["medium","high"],"default":"medium","status":"candidate","evidence":["opus_doc","opus_launch","sonar_opus"]},
+    "fable51": {"identity":"claude-fable-5-1","provider_id":"claude-fable-5-1","display":"Claude Fable 5.1","efforts":["high"],"default":"high","status":"candidate","evidence":["fable_doc","willison_fable"]},
+    "pro": {"identity":"gpt-6-pro-web","provider_id":null,"display":"GPT-6 Pro in ChatGPT web","efforts":[null],"default":null,"status":"candidate","evidence":["astra_launch"],"identity_note":"Logical policy identity. Trusted adapter binds the actual visible Pro selector and conversation; no guessed API slug."},
+    "fable55": {"identity":null,"provider_id":null,"display":"Claude Fable 5.5","efforts":[],"default":null,"status":"pending","evidence":[],"activation":["official_release","exact_identity","subscription_access","effort_mapping","heldout_regression","owner_activation_record"],"replaces":"fable51"}
+  },
+  "routes": {
+    "luna_low": {"model":"luna","effort":"low","slot":"worker","tier":0,"description":"Use GPT-6 Luna at low effort for a narrow, fully specified mechanical edit with clear tests and no unresolved design decision.","evidence":["luna_doc"]},
+    "luna_high": {"model":"luna","effort":"high","slot":"worker","tier":1,"description":"Use GPT-6 Luna at high effort for bounded implementation or debugging with known contracts and a localized verification plan.","evidence":["luna_doc","luna_launch"]},
+    "astra_high": {"model":"astra","effort":"high","slot":"worker","tier":2,"description":"Use GPT-6 Astra at high effort for medium-tough implementation, stateful tool investigation and dense cross-file reasoning under an approved architecture.","evidence":["astra_doc","astra_launch"]},
+    "opus_medium": {"model":"opus55","effort":"medium","slot":"worker","tier":2,"description":"Use Claude Opus 5.5 at medium effort as a peer for medium-tough multi-file implementation, iterative UI work or compact code with explicit acceptance tests; do not infer superiority from the frontend label alone.","evidence":["opus_doc","opus_launch"]},
+    "opus_high": {"model":"opus55","effort":"high","slot":"worker","tier":2,"description":"Use Claude Opus 5.5 at high effort for medium-tough work needing deeper investigation or careful reconciliation; verify concurrency and regressions instead of assuming safety from the model name.","evidence":["opus_doc","sonar_opus"]},
+    "pro_web": {"model":"pro","effort":null,"slot":"anchor","tier":3,"description":"Use GPT-6 Pro in the case-bound ChatGPT web conversation for tough problems, architecture, research and consequential design, followed by the required independent Claude challenge.","evidence":["astra_launch"]},
+    "review_fable51": {"model":"fable51","effort":"high","slot":"reviewer","tier":3,"description":"Use Claude Fable 5.1 at high effort as the independent reciprocal reviewer of the exact Pro solution, identifying evidence-based counterexamples and revising the shared case.","evidence":["fable_doc"]},
+    "review_opus55": {"model":"opus55","effort":"high","slot":"reviewer","tier":3,"description":"Use Claude Opus 5.5 at high effort as an equally eligible independent reciprocal reviewer of the exact Pro solution, including concrete implementation, interface and concurrency concerns.","evidence":["opus_doc","sonar_opus"]}
+  },
+  "baselines":{"routine":"luna_low","bounded":"luna_high","medium_tough":"astra_high","anchor":"pro_web","reviewer":"review_fable51"},
+  "effort_question": {
+    "instructions":"What permitted reasoning effort does the next generation require, considering the goal, current evidence and unresolved work?",
+    "descriptions":{"low":"Low effort for an authorized mechanical step with no unresolved inference; not merely because the next tool reads a file.","medium":"Medium effort for a well-constrained implementation step with explicit contracts and ordinary reasoning.","high":"High effort for difficult interpretation, cross-file interaction, uncertain failure causes or a substantive review.","insufficient":"Insufficient evidence to change the verified current effort."}
+  },
+  "lease_question": {
+    "instructions":"For how many model generations is the current effort decision likely to remain appropriate?",
+    "criteria":{"one":"One generation: uncertainty, fresh investigation or likely new decision-changing evidence.","two":"Two generations: a bounded short sequence with stable evidence.","five":"Five generations: a predictable sequence under an approved plan.","ten":"Ten generations: repetitive mechanical work with stable scope and no pending uncertainty.","insufficient":"Insufficient evidence for a lease; reassess next generation."},
+    "generations":{"one":1,"two":2,"five":5,"ten":10,"insufficient":1}
+  },
+  "qualification":{"default_status":"not_run","criteria":"Matched task-family evaluation with verified completion, quota, latency, rework, abstention and held-out cases.","brand_domain_rules":false,"api_cost_to_quota_conversion":false},
+  "defaults_are":"Engineering starting points, not universal optima or live deployment receipts"
+}

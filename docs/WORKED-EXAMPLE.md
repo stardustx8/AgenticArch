@@ -1,10 +1,10 @@
 # Worked example: accepted jobs must survive disconnection
 
-This is an illustrative task, not a claim about a deployed product or a measured SemIf result.
+This is an illustrative task, not a claim about a deployed product or a measured CLM result.
 
 ## Requirement and evidence
 
-The owner asks for accepted jobs to remain retrievable after a client disconnects. Clarify the established contract from project evidence: does acceptance mean persisted, does a backend restart matter, and what idempotency/result-retention guarantees already exist? A new durability or delivery-semantics decision goes to the required Pro/Fable architecture workflow; a local classifier does not invent it.
+The owner asks for accepted jobs to remain retrievable after a client disconnects. Clarify the established contract from project evidence: does acceptance mean persisted, does a backend restart matter, and what idempotency/result-retention guarantees already exist? A new durability or delivery-semantics decision goes to the required Pro/Claude architecture workflow; a local classifier does not invent it.
 
 Suppose the approved design requires durable acceptance, stable job IDs, resumable result retrieval and no duplicate side effects. The current implementation passes its ordinary connection tests.
 
@@ -18,9 +18,9 @@ Suppose the approved design requires durable acceptance, stable job IDs, resumab
 
 **Construct a real counterexample.** Within an explicitly authorized isolated environment, a test may accept a job, restart the service at a controlled point and retrieve the same job ID. Another may lose the response after persistence and retry with the same idempotency key. A local generator can propose input cases, but the approved contract supplies the oracle. A failure is observed only after execution.
 
-**Improve the remote review.** If the result changes architecture, the new evidence enters the existing case. Fable and Pro receive the minimal reproducible failure, relevant transaction code and open objection. The disagreement classifier can link related findings but cannot mark the concern resolved. Pro continues the same chat, and both participants approve the updated exact solution version.
+**Improve the remote review.** If the result changes architecture, the new evidence enters the existing case. Claude and Pro receive the minimal reproducible failure, relevant transaction code and open objection. The disagreement classifier can link related findings but cannot mark the concern resolved. Pro continues the same chat, and both participants approve the updated exact solution version.
 
-**Implement locally.** Original Codex checks the actual installed database/runtime and current worktree. Mechanical adaptations are recorded; changes to the agreed delivery semantics reopen review. Final tests are run against the final snapshot. The classifier never substitutes for those results.
+**Implement locally.** The original Codex or Pi coordinator checks the actual installed database/runtime and current worktree. Mechanical adaptations are recorded; changes to the agreed delivery semantics reopen review. Final tests are run against the final snapshot. The classifier never substitutes for those results.
 
 ## Why this is worth testing
 

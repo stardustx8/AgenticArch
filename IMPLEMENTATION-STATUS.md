@@ -1,42 +1,21 @@
 # Implementation status
 
-Date: 2026-09-24
+2026-09-25, kit revision 2.
 
-## Delivered in this kit
+## Implemented and offline-testable
 
-- Self-contained architecture, routing/verification policy, Pro/Fable protocol and state machine.
-- Phased implementation plan, security/recovery guidance and acceptance matrix.
-- Main coding-agent implementation prompt and participant/return prompts for real review cases.
-- Versioned policy and local configuration example, JSON schemas and synthetic fixtures.
-- Generic review-repository and case templates.
-- Dependency-free pure reference kernel with offline unit tests and kit consistency checks.
-- Directly revised skills with complete references and a dry-run-first, backup-preserving installer.
-- Owner requirements, workstation-first extensions and an explicit Pro UI capability gate.
-- Primary-source semantic-decision research, prioritized use cases, operator catalog, evaluation plan and offline decision-plane helpers/tests.
+Shared v2 policy and model/evidence registry; CLM request rendering and real loopback-only HTTP client; strict typed response/deployment/token-limit validation; subscription-only route eligibility and Astra/Opus peer tiers; joint effort/lease option generation; generation acknowledgment/state invalidation; quota attribution; participant-bound review epochs and original completion/evidence safeguards.
 
-## Not delivered or verified
+Both harness packages are present on main. Codex includes a native-checkpoint host contract; Pi includes a TypeScript setter/readback/abort adapter and structural fixture. The two actual skills are revised with self-contained references and the existing dry-run, backup-preserving installer. Requirements, architecture, evidence limits and cross-session handoff are current.
 
-The two actual skill definitions are directly revised under `skills/prepare-sol-pro-architecture-review/` and `skills/fable-adversarial-review/`, preserving their exact identifiers and supplying complete references. The installed local helper trees were not supplied; preserving those extra files is an installation requirement, not a completed observation. No skill-upgrade prompts are included.
+The concurrently published generic-choice CLM API and its 13 tests are preserved through compatibility exports. The concurrent v1 routing compiler/catalog and its 25 assertions-preserving tests are retained through an explicit versioned compatibility boundary. The integrated Python suite passes 189 tests. See the revision ledger for the explicit merge and requirement-ID mapping.
 
-Automatic Pro web submission is **not qualified**: the current standard Computer Use documentation excludes automating ChatGPT itself. The shipped default is manual Pro web transfer, with a conditional capability-gated future UI transport. See `docs/COMPUTER-USE-GATE.md`. This is not a verified unattended system.
+## Not implemented or not locally qualified
 
-Live Codex dispatch, the owner's installed SemIf backend, Computer Use upload/continuation, Fable invocation, Git collaboration, persistent runtime state, safe context export, skill installation and full end-to-end operation have **not** been executed or validated by this kit. They are implementation and local qualification work, not hidden completed features.
+The complete persistent coordinator/outbox supervisor, actual native Codex patch integration, full Pi extension wiring, installed CLM encoder/head/tokenizer, live subscription/billing observers, native Pi provider authorization, target-project execution, skill installation and real Pro/Claude case exchange remain local implementation/qualification work. No independent two-model review of this kit has been performed.
 
-The reference functions validate supplied observations. They cannot authenticate a participant or execute a test by themselves. Production adapters must collect trusted observations, recompute manifests, enforce path/export policies and preserve state atomically.
+Automatic Pro web operation remains unqualified; manual transfer is the default. The operational review repository has not been provisioned here. Fable 5.5 is pending, with no active route. No actual subscription saving or optimal local effort frontier has been measured.
 
-## External delivery
+## Verification and publication
 
-GitHub development context is organized through `START-HERE.md`, `docs/SESSION-HANDOFF.md` and `docs/DECISIONS.md`. Source and documentation are published as ordinary repository files, not only downloadable archives. Use the actual current remote revision for future sessions.
-
-A local archive or local Git commit does not establish a remote push. Verify the actual remote `main` commit and file contents after publishing. Review-repository creation is a separate authorized operation, not implied by this kit's templates.
-
-## Starting point
-
-Read `prompts/IMPLEMENT-AGENTICARCH.md`. Run:
-
-```sh
-python3 -m unittest discover -s tests -v
-python3 tools/check_kit.py
-```
-
-Mark live acceptance scenarios `NOT_RUN` until exercised in the real environment. Do not relabel offline successes as production readiness.
+Read [the validation report](docs/VALIDATION-REPORT.md). Passing tests establish fixture/contract behavior only. Verify the actual remote main revision and full source tree when publishing; source availability does not imply runtime installation. New sessions start with START-HERE and SESSION-HANDOFF.

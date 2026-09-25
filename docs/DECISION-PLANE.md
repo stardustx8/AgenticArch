@@ -1,6 +1,6 @@
 # Bounded semantic decision plane
 
-Status: target integration specification with an offline reference subset. Required model routing and the Pro/Fable protocol remain unchanged.
+Status: target integration specification with an offline reference subset. The v2 model catalog and Pro/selected-Claude protocol are normative.
 
 ## 1. Architecture
 
@@ -11,27 +11,27 @@ Owner requirements + approved plan + live local capabilities
                          |
        immutable event/snapshot + provenance registry
               /          |              \
-     direct tools   SemIf decision     permitted local
+     direct tools   CLM decision     permitted local
                     operators          generative helpers
               \          |              /
            observed evidence + advisory proposals
                          |
               policy/capability validation
                          |
-   permitted coding lane / diagnostic / Pro-Fable turn / pause
+   permitted coding lane / diagnostic / Pro-Claude turn / pause
 ```
 
-The custom Codex integration publishes events and consumes advisory proposals through an in-process API or local stdio sidecar. A dedicated daemon, message broker, vector service or graph database is unnecessary initially. Keep one coordinator in charge of state transitions. Existing functions in `reference/core.py` remain the hard routing/convergence/completion reference.
+The selected Codex or Pi profile publishes events and consumes advisory proposals through an in-process API or local stdio sidecar. A dedicated daemon, message broker, vector service or graph database is unnecessary initially. Keep one coordinator in charge of state transitions. Existing functions in `reference/core.py` remain the hard routing/convergence/completion reference.
 
 ## 2. Five boundaries that must not blur
 
 **Observation** is measured or retrieved data with provenance. **Predicate** is a fallible semantic judgment over that data. **Proposal** is an allowed next step suggested by a predicate. **Authorization** is a user/controller policy decision. **Verification** is evidence collected by actual checks on the current snapshot.
 
-A `supported` predicate is not an observed PASS. A high-ranked action is not authorized. A suggestion to re-check a requirement does not rewrite it. A Pro/Fable consensus is not evidence the local implementation passed. Represent these as different types/records, not a single `confidence` field.
+A `supported` predicate is not an observed PASS. A high-ranked action is not authorized. A suggestion to re-check a requirement does not rewrite it. A Pro/Claude consensus is not evidence the local implementation passed. Represent these as different types/records, not a single `confidence` field.
 
 ## 3. Event and snapshot contract
 
-Emit events at meaningful boundaries: `intake`, `context_ready`, `verification_failed`, `implementation_pass`, `review_turn`, `observation_added`, and `case_return`. Do not call SemIf after every file read or on an arbitrary fast timer.
+Emit events at meaningful boundaries: `intake`, `context_ready`, `verification_failed`, `implementation_pass`, `review_turn`, `observation_added`, and `case_return`. Do not call CLM after every file read or on an arbitrary fast timer.
 
 A projection contains only the allowlisted evidence required by one operator. Record project/task/case IDs, requirement/plan/target snapshot digests, evidence IDs/ranges, source freshness, observed-vs-inferred status, and the authorization-scope digest. Preserve raw logs locally; send short bounded excerpts to a scoring backend. Missing context is represented as missing evidence, not replaced with invented facts.
 
@@ -39,7 +39,7 @@ Events are deduplicated by exact content/state identity. A changed requirement, 
 
 ## 4. Operator catalog
 
-`config/decision-operators.json` defines stable operator IDs, triggers, projections, atomic questions, exact option menus, fallback and permitted influence. All entries start in shadow mode. It is an AgenticArch contract, not SemIf's upstream API.
+`config/decision-operators.json` defines stable operator IDs, triggers, projections, atomic questions, exact option menus, fallback and permitted influence. All entries start in shadow mode. It is an AgenticArch contract, not CLM's upstream API.
 
 Use four main operator forms:
 
@@ -52,7 +52,7 @@ Separate independent semantic axes. For example, novelty, relevance and severity
 
 ## 5. Shared-state batching and bounded speculation
 
-Start with direct mode as the baseline. Group questions only when their serialized state projection and complete execution context match. Enable prefix reuse/parallel suffixes only after equivalence and resource tests for the installed backend. Use its discovered supported option count; this catalog conservatively caps menus at 16, including abstention, matching the inspected baseline.
+Start with uncached scoring as the measurement baseline, then qualify CLM state/action vector caches. Different question text changes the state-side encoding. Group only genuinely compatible requests; no assumed generative prefix or parallel-suffix equivalence is inherited. This generic operator catalog caps menus at 16 as a project choice, not an upstream CLM limit. The routing adapter permits up to 32 declared options.
 
 A speculative question is valid only if answerable from current state. For example, “does this error suggest a transport failure?” and “does this error mention persistence?” can be asked together. “Did the reconnect test pass?” cannot be asked until that test runs. Interpret a counterfactual output only inside the branch whose preconditions hold.
 
@@ -74,24 +74,24 @@ No operator can lower an owner model floor, close a material objection, remove a
 
 ## 8. Context and memory
 
-Start with existing scoped search, AST/import indexes where available, SQLite observations and optional embeddings. Each record has immutable original content/ref, project scope, time/revision and source authority. Suggested relationships are separate rows. Exact temporal/order/identity relations use software; ambiguous relevance or contradiction may use SemIf.
+Start with existing scoped search, AST/import indexes where available, SQLite observations and optional embeddings. Each record has immutable original content/ref, project scope, time/revision and source authority. Suggested relationships are separate rows. Exact temporal/order/identity relations use software; ambiguous relevance or contradiction may use CLM.
 
 Pinned requirements and mandatory evidence are always included in a handoff pack. Preserve the ability to expand a filtered pack. Inferred memories, model claims and customer documents are never promoted to user instructions. Requirement changes come only from an authorized owner decision, not semantic similarity.
 
 ## 9. Local GPU and model roles
 
-Use the existing SemIf installation and custom Codex provider registry. Measure actual cold/warm prefill, peak memory and workload interference on the owner's 96 GB GPU. Keep one heavy optional generative job initially, with a configurable resource reservation for interactive work. Do not assume model weights alone determine memory fit.
+Use a pinned qualified CLM deployment and the selected harness profile; the owner has not yet installed this migration. Measure actual cold/warm prefill, peak memory and workload interference on the owner's 96 GB GPU. Keep one heavy optional generative job initially, with a configurable resource reservation for interactive work. Do not assume model weights alone determine memory fit.
 
-Optional local models produce evidence summaries, candidate tests or retrieval embeddings. Their outputs retain provenance and are not substitutes for required Luna/Astra/Pro work. Pro/Fable approve consequential architecture changes. A scheduling policy may postpone an optional helper, but cannot silently swap the requested model family.
+Optional local models produce evidence summaries, candidate tests or retrieval embeddings. Their outputs retain provenance and are not substitutes for required Luna/Astra/Opus/Pro work. Pro/Claude approve consequential architecture changes. A scheduling policy may postpone an optional helper, but cannot silently swap the requested model family.
 
 ## 10. Interaction with the two skills
 
 Before Pro handoff, use the local layer to propose evidence gaps and the most relevant scoped attachments. The exact manifest, redaction, approval and export controls still apply. The reviewer sees explicit missing evidence and can request expansion.
 
-During Fable/Pro turns, use it to propose objection links and relevant new evidence. Original turns and objections remain intact. Required replies and approval digests cannot be filtered out. At case return, use semantic drift signals to focus `LOCAL-DELTA.md` review; let the original Codex session decide within scope and reopen material changes.
+During Claude/Pro turns, use it to propose objection links and relevant new evidence. Original turns and objections remain intact. Required replies and approval digests cannot be filtered out. At case return, use semantic drift signals to focus `LOCAL-DELTA.md` review; let the original local coordinator decide within scope and reopen material changes.
 
 ## 11. Deployment stages
 
-Implement the dependency-free contracts and offline fixtures first; connect actual SemIf in shadow mode second; conduct representative held-out evaluation third; activate each advisory family separately fourth. Keep rollback to the deterministic baseline immediate. Training, graph expansion and speculative local workers are later, independently qualified features.
+Implement the dependency-free contracts and offline fixtures first; connect actual CLM in shadow mode second; conduct representative held-out evaluation third; activate each advisory family separately fourth. Keep rollback to the deterministic baseline immediate. Training, graph expansion and speculative local workers are later, independently qualified features.
 
 See [research and priorities](SEMANTIC-DECISION-OPPORTUNITIES.md), [evaluation](DECISION-EVALUATION.md), and `reference/decision_plane.py`. The latter is not the complete orchestrator, runtime adapter, safe file collector, durable queue or security boundary.

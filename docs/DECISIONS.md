@@ -1,35 +1,45 @@
-# Durable decision log
+# Durable decisions
 
-Initial record: 2026-09-24. Owner requirements are normative in [OWNER-REQUIREMENTS.md](OWNER-REQUIREMENTS.md). Entries below distinguish explicit owner choices from selected engineering decisions. Amendments need evidence, affected requirements, verification and a recorded decision; do not silently rewrite history.
+The initial published baseline was 8b96744 (2026-09-24). This record preserves its intent while explicitly superseding changed choices. Owner requirements are normative in OWNER-REQUIREMENTS.md.
 
-## D001: GitHub as the shared project baseline
+## D001: shared GitHub baseline, retained
 
-**Owner requirement.** Maintain the complete reusable solution and future development context in `stardustx8/AgenticArch`, integrated on `main`. Source, specifications, requirements, skills and test guidance belong together. Fresh sessions start from [START-HERE.md](../START-HERE.md) and the current handoff, not from chat memory. Preserve concurrent changes, use ordinary commits and never force-push to reconcile another session's work.
+Keep complete reusable context, source, skills and tests on main. Read current Git state before editing, preserve concurrent work and update the handoff/status at closeout. Public specification is separate from private runtime evidence and credentials.
 
-## D002: Fixed primary model roles
+## D002: expanded primary model roles, amended 2026-09-25
 
-**Owner requirement.** Luna low/high for appropriate bounded work; Astra high for medium-tough work; GPT-6 Pro web for tough, architectural and research work. The legacy `prepare-sol-pro-architecture-review` identifier does not choose a historical model. No silent effort or transport substitutions.
+Owner amendment: medium-tough work has Astra high and Opus 5.5 medium/high as peers. Deep work keeps GPT-6 Pro web and selects Fable 5.1 high or Opus 5.5 high for reciprocal review. Luna remains low/high only. Pending Fable 5.5 requires explicit release/access/regression activation.
 
-## D003: Actual two-model review and local implementation
+## D003: real reciprocal review, retained and strengthened
 
-**Owner requirement, with engineering safeguards.** Pro and Fable co-produce an agreed solution through the separate review repository and the case's same Pro chat. Immutable turns and exact-digest approvals enforce version identity. The original local Codex session reconciles unknown local facts, implements and verifies. Agreement is not empirical proof or permission for unrelated external changes.
+Use actual participants, the same Pro case chat, immutable turns and exact-digest approval. Freeze Claude identity per epoch; switching it invalidates approvals while preserving history and open objections. Original local coordinator reconciles local facts and implements. Consensus does not prove correctness or grant authority.
 
-## D004: Local SemIf as decision support
+## D004: CLM migration, supersedes previous backend
 
-**Owner requirement, with selected engineering scope.** SemIf runs locally. Hard policy, permissions, requirements and tool evidence remain outside learned control. Initial extensions prioritize context selection, requirement gaps, next diagnostics, local drift and review triage. All nine catalog operators begin in shadow mode; promote each only with workload-specific evidence.
+Owner amendment: use the pinned local contrastive state/action model. Reset previous calibration and cache assumptions. Store curated routing knowledge as JSON, render concise prose plus action descriptions, and keep hard eligibility outside the learned decision. Begin all operators in shadow mode.
 
-## D005: Small coordinator before optional extensions
+## D005: dual harness packages, amended
 
-**Engineering baseline.** Preserve the custom Codex, use one local coordinator, ordinary Git and transactional local state. Add provenance-aware memory, approved diagnostic playbooks, isolated counterexamples and specialist training only when measured benefits justify them. More agents are not a goal in themselves.
+Preserve custom Codex as the initial integration target and supply Pi on the same shared core. Native Pi and delegated Pi are separate measurement configurations. Claude subscription work uses the unmodified native worker; native Pi OpenAI access needs its own qualification. No divergent architecture branches are necessary.
 
-## D006: Manual Pro transfer until automation is qualified
+## D006: manual Pro transport, retained
 
-**Recorded capability gate, not a change to the owner's target.** The supplied kit documents the dated Computer Use limitation and provides a manual ZIP/prompt path. Automatic upload and same-chat continuation require a supported, permitted and tested transport. Follow [the gate](COMPUTER-USE-GATE.md); do not introduce a restriction bypass.
+Current official Computer Use still excludes automating ChatGPT itself. Preserve manual ZIP/prompt continuation and exact chat binding. Automation needs a newly permitted, supported and tested path, not a workaround.
 
-## D007: Public development context, private execution context
+## D007: subscription efficiency, added
 
-**Engineering/privacy boundary.** Publish generic source and sanitized evidence. Keep credentials, chat bindings, customer data, live case exports and machine-specific state private. The `GPT-Pro-Escalation` template is included; creating that repository or exporting real case data is not performed by this publication. No license choice is silently added.
+Owner clarification accepted: harness overhead can affect included usage. Optimize verified completed work against observed provider-specific quota and time. API-equivalent savings are not a quota conversion. No paid spillover or API fallback. Unknown attribution is not free usage.
 
-## Future entries
+## D008: bounded generation effort, added
 
-For each substantive change, record the date, proposal, evidence, affected requirements, alternatives considered, authority/owner decision, implementation references, tests and rollback. Keep minor mechanical changes in the ordinary Git history rather than inventing a design decision for every edit.
+Adopt the native apply/capture/ack ordering and short leases. Restrict model effort menus, honor manual overrides, invalidate stale state and keep model switches at worker boundaries. A setter's presence or synthetic fixture does not prove real cancellation/cache behavior.
+
+## D009: evidence-ranked priors, added
+
+Primary experiments, vendor claims, independent evaluations and firsthand editorial observations are separately labelled in the registry. Task-domain preferences are provisional except explicit owner-required floors. No universal backend/frontend winner or measured quota-optimal effort is claimed. Local held-out evaluation governs promotion.
+
+## D010: preserve concurrent CLM work, added
+
+The integration preserves concurrent commits through 294ebcb0, including f3538855 and 10592526, retaining the earlier revision ledger, its explicitly mapped requirement IDs and all 13 generic-choice tests. Keep its public imports stable using an unchanged compatibility module; new routing uses the stricter supervised client. Neither interface grants permission or proves deployment identity. The subsequent v1 routing/compiler source and its 25 tests remain available through an explicit compatibility boundary; active profiles use the v2 catalog. The six subsequent research/profile additions are retained with explicit active/supplemental mappings in INTEGRATION-RECONCILIATION.md.
+
+For future entries record date, requirement impact, evidence, actual verification, alternatives and rollback. Do not silently replace history with a new unsupported certainty.

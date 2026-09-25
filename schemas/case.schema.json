@@ -4,7 +4,7 @@
   "type": "object",
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "case_id": {
       "type": "string",
@@ -13,12 +13,14 @@
     "status": {
       "enum": [
         "PREPARED",
+        "WAIT_PERMISSION",
+        "WAIT_MANUAL_TRANSFER",
         "WAIT_CAPABILITY",
         "WAIT_ENVIRONMENT",
         "WAIT_HUMAN",
         "PRO_PENDING",
         "PRO_READY",
-        "FABLE_PENDING",
+        "CLAUDE_PENDING",
         "PRO_REVIEW_PENDING",
         "PAUSED",
         "CONVERGED",
@@ -60,9 +62,19 @@
       "enum": [
         "coordinator",
         "pro",
-        "fable",
+        "claude",
         "owner"
       ]
+    },
+    "claude_model_id": {
+      "enum": [
+        "claude-fable-5-1",
+        "claude-opus-5-5"
+      ]
+    },
+    "review_epoch": {
+      "type": "integer",
+      "minimum": 1
     }
   },
   "required": [
@@ -74,7 +86,9 @@
     "bundle_digest",
     "solution_digest",
     "rounds_total",
-    "next_actor"
+    "next_actor",
+    "claude_model_id",
+    "review_epoch"
   ],
   "additionalProperties": false
 }
