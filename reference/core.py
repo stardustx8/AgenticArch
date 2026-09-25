@@ -36,7 +36,7 @@ def _digest(value: str) -> bool:
 
 
 def validate_lane(model_family: str, reasoning: str | None) -> Lane:
-    """Validate the requested policy lane, not provider model availability."""
+    """Validate legacy competence anchors, not the complete worker candidate set."""
     lookup = {
         ('GPT-6 Luna', 'low'): Lane.LUNA_LOW,
         ('GPT-6 Luna', 'high'): Lane.LUNA_HIGH,
@@ -50,10 +50,10 @@ def validate_lane(model_family: str, reasoning: str | None) -> Lane:
 
 
 def validate_policy(policy: Mapping[str, Any]) -> None:
-    if type(policy.get('schema_version')) is not int or policy['schema_version'] != 1:
+    if type(policy.get('schema_version')) is not int or policy['schema_version'] != 2:
         raise ValueError('Unsupported policy schema')
     if set(policy.get('lanes', {})) != {lane.value for lane in LANES}:
-        raise ValueError('Policy must declare exactly the four lanes')
+        raise ValueError('Policy must declare exactly the four competence anchors')
     for name, spec in policy['lanes'].items():
         if validate_lane(spec['model_family'], spec['reasoning']).value != name:
             raise ValueError('Lane name does not match model/effort')
@@ -67,13 +67,17 @@ def validate_policy(policy: Mapping[str, Any]) -> None:
     for key in ('max_passes_per_lane', 'max_coding_passes', 'max_no_progress_passes'):
         if type(policy.get(key)) is not int or policy[key] < 1:
             raise ValueError(f'{key} must be a positive integer')
-    semif = policy.get('semif', {})
-    if semif.get('mode') not in {'shadow', 'advisory'}:
-        raise ValueError('Unsupported SemIf mode')
-    if (semif.get('local_only') is not True or
-            semif.get('can_lower_floor') is not False or
-            semif.get('can_authorize_completion') is not False):
-        raise ValueError('SemIf authority must remain bounded and local')
+    clm = policy.get('clm', {})
+    if clm.get('mode') not in {'shadow', 'advisory'}:
+        raise ValueError('Unsupported CLM mode')
+    if (clm.get('local_only') is not True or
+            clm.get('can_lower_floor') is not False or
+            clm.get('can_authorize_completion') is not False):
+        raise ValueError('CLM authority must remain bounded and local')
+    if (policy.get('model_catalog') != 'config/model-routing.json' or
+            policy.get('harness_profiles') != 'config/harness-profiles.json' or
+            policy.get('subscription_only') is not True or policy.get('api_fallback') is not False):
+        raise ValueError('Shared subscription-only routing is required')
     verification = policy.get('verification', {})
     if any(verification.get(k) is not True for k in (
         'nonempty_required_checks', 'same_snapshot_and_plan', 'all_observed_failures_block'
@@ -81,11 +85,14 @@ def validate_policy(policy: Mapping[str, Any]) -> None:
         raise ValueError('Verification guards cannot be disabled')
     debate = policy.get('debate', {})
     if (debate.get('review_repository_name') != 'GPT-Pro-Escalation' or
-            set(debate.get('required_roles', [])) != {'pro', 'fable'} or
+            set(debate.get('required_roles', [])) != {'pro', 'reviewer'} or
             debate.get('same_chat_for_pro') is not True or
             debate.get('matching_solution_digests') is not True or
             debate.get('on_budget_exhausted') != 'PAUSED'):
         raise ValueError('Invalid debate policy')
+    if (set(debate.get('reviewer_identities', [])) != {'claude-fable-5-1', 'claude-opus-5-5'} or
+            debate.get('participant_bound_approvals') is not True):
+        raise ValueError('Exact selected Claude participant must bind approvals')
     if debate.get('skill') != 'fable-adversarial-review':
         raise ValueError('The exact Fable skill identifier is required')
     transport = policy.get('pro_transport', {})
@@ -224,10 +231,12 @@ class Receipt:
     receipt_id: str
     case_id: str
     role: str
-    phase: str  # fable_challenge, pro_response, initial, or review
+    phase: str  # reviewer_challenge, pro_response, initial, or review
     sequence: int  # Assigned by the coordinator, never a model-supplied timestamp.
     identity_verified: bool
     durable_output_verified: bool
+    participant_identity: str | None = None
+    participant_binding_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,6 +261,8 @@ class CaseReview:
     manifest_verified: bool = False
     evidence_references_verified: bool = False
     required_deliverables_present: bool = False
+    reviewer_identity: str | None = None
+    participant_binding_digest: str | None = None
 
 
 def convergence_errors(case: CaseReview) -> list[str]:
@@ -265,6 +276,9 @@ def convergence_errors(case: CaseReview) -> list[str]:
             errors.append(flag)
     if case.unresolved_blockers:
         errors.append('unresolved_blockers')
+    if (case.reviewer_identity not in {'claude-fable-5-1', 'claude-opus-5-5'} or
+            not _digest(case.participant_binding_digest)):
+        errors.append('invalid_participant_binding')
     receipts = {r.receipt_id: r for r in case.receipts}
     if len(receipts) != len(case.receipts):
         errors.append('duplicate_receipt')
@@ -273,10 +287,12 @@ def convergence_errors(case: CaseReview) -> list[str]:
             any(type(n) is not int or n < 1 for n in sequences)):
         errors.append('invalid_receipt_sequence')
     valid = [r for r in case.receipts if (
-        r.receipt_id and r.case_id == case.case_id and r.role in {'pro', 'fable'} and
-        r.identity_verified is True and r.durable_output_verified is True
+        r.receipt_id and r.case_id == case.case_id and r.role in {'pro', 'reviewer'} and
+        r.identity_verified is True and r.durable_output_verified is True and
+        r.participant_binding_digest == case.participant_binding_digest and
+        r.participant_identity == ('gpt-6-pro-web' if r.role == 'pro' else case.reviewer_identity)
     )]
-    challenges = [r.sequence for r in valid if r.role == 'fable' and r.phase == 'fable_challenge']
+    challenges = [r.sequence for r in valid if r.role == 'reviewer' and r.phase == 'reviewer_challenge']
     responses = [r.sequence for r in valid if r.role == 'pro' and r.phase == 'pro_response']
     valid_responses = [b for b in responses if any(a < b for a in challenges)]
     if not valid_responses:
@@ -294,7 +310,7 @@ def convergence_errors(case: CaseReview) -> list[str]:
         used_receipts.add(review.receipt_id)
         if receipt.sequence > latest.get(review.role, (-1, review))[0]:
             latest[review.role] = (receipt.sequence, review)
-    for role in ('pro', 'fable'):
+    for role in ('pro', 'reviewer'):
         if role not in latest:
             errors.append(f'missing_{role}_review')
             continue
@@ -357,6 +373,7 @@ class Completion:
     expected_solution_digest: str | None = None
     expected_requirements_digest: str | None = None
     expected_bundle_digest: str | None = None
+    expected_participant_binding_digest: str | None = None
 
 
 def completion_errors(state: Completion) -> list[str]:
@@ -400,9 +417,11 @@ def completion_errors(state: Completion) -> list[str]:
             if convergence_errors(state.case):
                 errors.append('case_not_converged')
             expected = (state.expected_case_id, state.expected_solution_digest,
-                        state.expected_requirements_digest, state.expected_bundle_digest)
+                        state.expected_requirements_digest, state.expected_bundle_digest,
+                        state.expected_participant_binding_digest)
             actual = (state.case.case_id, state.case.solution_digest,
-                      state.case.requirements_digest, state.case.bundle_digest)
+                      state.case.requirements_digest, state.case.bundle_digest,
+                      state.case.participant_binding_digest)
             if actual != expected:
                 errors.append('case_not_bound_to_local_task')
         if state.local_reconciled is not True:

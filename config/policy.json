@@ -1,69 +1,23 @@
 {
-  "schema_version": 1,
-  "lanes": {
-    "luna_low": {
-      "model_family": "GPT-6 Luna",
-      "reasoning": "low"
-    },
-    "luna_high": {
-      "model_family": "GPT-6 Luna",
-      "reasoning": "high"
-    },
-    "astra_high": {
-      "model_family": "GPT-6 Astra",
-      "reasoning": "high"
-    },
-    "pro_web": {
-      "model_family": "GPT-6 Pro",
-      "reasoning": null,
-      "transport": "chatgpt_web",
-      "skill": "prepare-sol-pro-architecture-review"
-    }
+  "schema_version":2,
+  "lanes":{
+    "luna_low":{"model_family":"GPT-6 Luna","reasoning":"low"},
+    "luna_high":{"model_family":"GPT-6 Luna","reasoning":"high"},
+    "astra_high":{"model_family":"GPT-6 Astra","reasoning":"high"},
+    "pro_web":{"model_family":"GPT-6 Pro","reasoning":null,"transport":"chatgpt_web","skill":"prepare-sol-pro-architecture-review"}
   },
-  "complexity_floor": {
-    "routine": "luna_low",
-    "bounded": "luna_high",
-    "medium_tough": "astra_high",
-    "tough": "pro_web"
+  "complexity_floor":{"routine":"luna_low","bounded":"luna_high","medium_tough":"astra_high","tough":"pro_web"},
+  "mandatory_pro_categories":["architecture","research","security_design","migration_design","irreversible_change_design"],
+  "max_passes_per_lane":2,"max_coding_passes":6,"max_no_progress_passes":2,
+  "debate":{
+    "review_repository_name":"GPT-Pro-Escalation","required_roles":["pro","reviewer"],
+    "same_chat_for_pro":true,"max_rounds_per_run":6,"max_nonprogress_rounds":2,
+    "on_budget_exhausted":"PAUSED","matching_solution_digests":true,"skill":"fable-adversarial-review",
+    "reviewer_identities":["claude-fable-5-1","claude-opus-5-5"],"participant_bound_approvals":true
   },
-  "mandatory_pro_categories": [
-    "architecture",
-    "research",
-    "security_design",
-    "migration_design",
-    "irreversible_change_design"
-  ],
-  "max_passes_per_lane": 2,
-  "max_coding_passes": 6,
-  "max_no_progress_passes": 2,
-  "debate": {
-    "review_repository_name": "GPT-Pro-Escalation",
-    "required_roles": [
-      "pro",
-      "fable"
-    ],
-    "same_chat_for_pro": true,
-    "max_rounds_per_run": 6,
-    "max_nonprogress_rounds": 2,
-    "on_budget_exhausted": "PAUSED",
-    "matching_solution_digests": true,
-    "skill": "fable-adversarial-review"
-  },
-  "semif": {
-    "mode": "shadow",
-    "local_only": true,
-    "can_lower_floor": false,
-    "can_authorize_completion": false
-  },
-  "verification": {
-    "nonempty_required_checks": true,
-    "same_snapshot_and_plan": true,
-    "all_observed_failures_block": true
-  },
-  "pro_transport": {
-    "default": "manual",
-    "automatic_requires_permitted_capability": true,
-    "no_restriction_bypass": true,
-    "no_silent_model_substitution": true
-  }
+  "clm":{"mode":"shadow","local_only":true,"can_lower_floor":false,"can_authorize_completion":false},
+  "verification":{"nonempty_required_checks":true,"same_snapshot_and_plan":true,"all_observed_failures_block":true},
+  "pro_transport":{"default":"manual","automatic_requires_permitted_capability":true,"no_restriction_bypass":true,"no_silent_model_substitution":true},
+  "model_catalog":"config/model-routing.json","harness_profiles":"config/harness-profiles.json",
+  "subscription_only":true,"api_fallback":false
 }

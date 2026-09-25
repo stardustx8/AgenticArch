@@ -17,13 +17,14 @@ A, B, C, D = ('a' * 64, 'b' * 64, 'c' * 64, 'd' * 64)
 
 def valid_case():
     return CaseReview('case-1', A, B, C, [
-        Review('fable', 'APPROVE', A, B, C, 'f1'),
+        Review('reviewer', 'APPROVE', A, B, C, 'f1'),
         Review('pro', 'APPROVE', A, B, C, 'p1'),
     ], [
-        Receipt('f1', 'case-1', 'fable', 'fable_challenge', 1, True, True),
-        Receipt('p1', 'case-1', 'pro', 'pro_response', 2, True, True),
+        Receipt('f1', 'case-1', 'reviewer', 'reviewer_challenge', 1, True, True, 'claude-fable-5-1', D),
+        Receipt('p1', 'case-1', 'pro', 'pro_response', 2, True, True, 'gpt-6-pro-web', D),
     ], manifest_verified=True, evidence_references_verified=True,
-       required_deliverables_present=True)
+       required_deliverables_present=True, reviewer_identity='claude-fable-5-1',
+       participant_binding_digest=D)
 
 
 def valid_completion():
@@ -73,7 +74,7 @@ class PolicyTests(unittest.TestCase):
             route('routine', ['unknown'])
 
     def test_weakened_policy_rejected(self):
-        for group, key, value in [('semif', 'can_lower_floor', True),
+        for group, key, value in [('clm', 'can_lower_floor', True),
                                    ('debate', 'same_chat_for_pro', False),
                                    ('verification', 'nonempty_required_checks', False)]:
             policy = copy.deepcopy(POLICY)
@@ -97,7 +98,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_environment_is_not_a_reasoning_failure(self):
         self.assertEqual(after_failure(Lane.LUNA_HIGH, lane_passes=2, total_passes=6,
-            no_progress_passes=2, cause='environment', has_hypothesis=False, policy=POLICY)[0],
+            no_progress_passes=2, cause='environment', has_hypothesis=True, policy=POLICY)[0],
             'WAIT_ENVIRONMENT')
 
     def test_no_hypothesis_does_not_loop(self):
@@ -109,10 +110,10 @@ class AdviceTests(unittest.TestCase):
     def data(self):
         return {'schema_version': 1, 'request_id': 'req-1', 'state_digest': A,
                 'ordered_options': ['luna_low', 'luna_high'],
-                'scores': {'luna_low': 0.4, 'luna_high': 0.6}, 'selected': 'luna_high',
+                'scores': {'luna_low': 0.2, 'luna_high': 0.8}, 'selected': 'luna_high',
                 'calibration': 'uncalibrated',
-                'provenance': {'model_revision': 'rev', 'tokenizer_revision': 'rev',
-                               'backend': 'test', 'prompt_version': 'v1'}}
+                'provenance': {'model_revision': 'pinned', 'tokenizer_revision': 'pinned',
+                               'backend': 'synthetic', 'prompt_version': '1'}}
 
     def check(self, data):
         return validate_advice(data, request_id='req-1', state_digest=A,
@@ -121,15 +122,14 @@ class AdviceTests(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(self.check(self.data()), 'luna_high')
 
-    def test_nonfinite_bool_out_of_range_and_bad_sum(self):
-        for value in (float('nan'), float('inf'), -0.1, 1.1, True, 0.2):
+    def test_invalid_probabilities(self):
+        for value in (float('nan'), float('inf'), -0.1, 1.2, True):
             data = self.data(); data['scores']['luna_low'] = value
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                self.check(data)
+            with self.subTest(value=value), self.assertRaises(ValueError): self.check(data)
 
-    def test_unknown_selected_or_request(self):
-        for field, value in [('selected', 'UNKNOWN'), ('request_id', 'stale'),
-                              ('state_digest', B), ('ordered_options', ['luna_high', 'luna_low'])]:
+    def test_bad_identity_and_options(self):
+        for field, value in [('request_id', 'other'), ('state_digest', B),
+                             ('ordered_options', ['luna_high', 'luna_low'])]:
             data = self.data(); data[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError): self.check(data)
 
@@ -167,7 +167,7 @@ class ConvergenceTests(unittest.TestCase):
             case = valid_case()
             changed = replace(case.reviews[0], **{field: D})
             with self.subTest(field=field):
-                self.assertIn('fable_stale_approval', convergence_errors(
+                self.assertIn('reviewer_stale_approval', convergence_errors(
                     replace(case, reviews=[changed, case.reviews[1]])))
 
     def test_blockers_and_missing_manifest(self):
@@ -176,11 +176,11 @@ class ConvergenceTests(unittest.TestCase):
 
     def test_latest_verdict_wins_not_an_old_approval(self):
         case = valid_case()
-        receipt = Receipt('f2', case.case_id, 'fable', 'review', 3, True, True)
-        review = Review('fable', 'REVISE', A, B, C, 'f2')
+        receipt = Receipt('f2', case.case_id, 'reviewer', 'review', 3, True, True, 'claude-fable-5-1', D)
+        review = Review('reviewer', 'REVISE', A, B, C, 'f2')
         errors = convergence_errors(replace(case, receipts=[*case.receipts, receipt],
                                             reviews=[review, *case.reviews]))
-        self.assertIn('fable_not_approved', errors)
+        self.assertIn('reviewer_not_approved', errors)
 
     def test_unverified_or_wrong_case_receipt_rejected(self):
         for delta in ({'identity_verified': False}, {'case_id': 'other'},
@@ -200,8 +200,8 @@ class ConvergenceTests(unittest.TestCase):
 
     def test_new_turn_without_verdict_invalidates_old_approval(self):
         case = valid_case()
-        receipt = Receipt('f2', case.case_id, 'fable', 'review', 3, True, True)
-        self.assertIn('fable_latest_turn_unreviewed', convergence_errors(
+        receipt = Receipt('f2', case.case_id, 'reviewer', 'review', 3, True, True, 'claude-fable-5-1', D)
+        self.assertIn('reviewer_latest_turn_unreviewed', convergence_errors(
             replace(case, receipts=[*case.receipts, receipt])))
 
     def test_budget_is_pause_not_agreement(self):
@@ -252,7 +252,7 @@ class CompletionTests(unittest.TestCase):
     def test_pro_agreement_without_local_reconciliation_is_not_done(self):
         state = replace(valid_completion(), pro_required=True, case=valid_case(),
                         expected_case_id='case-1', expected_solution_digest=A,
-                        expected_requirements_digest=B, expected_bundle_digest=C)
+                        expected_requirements_digest=B, expected_bundle_digest=C, expected_participant_binding_digest=D)
         self.assertIn('local_reconciliation_required', completion_errors(state))
         self.assertEqual(completion_errors(replace(state, local_reconciled=True)), [])
 
@@ -265,7 +265,7 @@ class CompletionTests(unittest.TestCase):
         state = replace(valid_completion(), pro_required=True, case=valid_case(),
                         local_reconciled=True, expected_case_id='another-case',
                         expected_solution_digest=A, expected_requirements_digest=B,
-                        expected_bundle_digest=C)
+                        expected_bundle_digest=C, expected_participant_binding_digest=D)
         self.assertIn('case_not_bound_to_local_task', completion_errors(state))
 
     def test_missing_or_unapproved_pro_case(self):

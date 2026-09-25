@@ -1,70 +1,38 @@
 ---
 name: prepare-sol-pro-architecture-review
-description: "Escalate tough problems, architecture and research to GPT-6 Pro in ChatGPT web: build a scoped evidence ZIP and prompt, coordinate a permitted handoff into GPT-Pro-Escalation, then activate fable-adversarial-review. Keep this exact identifier for compatibility."
+description: "Prepare and hand off tough work, architecture and research to GPT-6 Pro in ChatGPT web; bind a Fable 5.1 or Opus 5.5 reviewer and continue through GPT-Pro-Escalation. Retain this exact identifier."
 ---
 
-# Prepare and hand off a GPT-6 Pro review
+# Prepare a GPT-6 Pro case
 
-## Outcome and activation
+Use this skill for tough work, architecture, research, consequential design, or explicit invocation. The required anchor is actual GPT-6 Pro in ChatGPT web, not an API model or a local role named Pro. Verify the visible selector and permitted transport. Keep runtime settings outside the task prompt. Preserve this skill identifier for compatibility; its historical name does not choose a historical model.
 
-Use this skill for tough work, architecture-level decisions, research, consequential implementation plans, or an explicit invocation. Produce a complete evidence pack and a final, challengeable Pro solution in `GPT-Pro-Escalation`, then hand the case to `fable-adversarial-review`. This is not an instruction to select the historical model named in this skill's identifier.
+Read [the protocol](references/protocol.md), [handoff template](references/handoff-template.md) and [transport gate](references/transport-gate.md). The calling harness may be custom Codex or the qualified Pi profile. Record the original task/session and harness; do not start a different task after review.
 
-Required reviewer: **GPT-6 Pro in the ChatGPT web interface**, with the actual visible Pro selection verified. Ordinary Astra at high/max, an API model, or an agent role labelled “Pro” is not a substitute. Only an explicit owner policy change may select a different reviewer/transport. Keep runtime model controls outside the task prompt. Use current official guidance for the selected product; do not treat a moving model page or the model's self-description as identity evidence.
+## Prepare and bind
 
-Read [the shared case protocol](references/protocol.md), [the handoff template](references/handoff-template.md), and [the transport gate](references/transport-gate.md). These references are self-contained and ship with the skill.
+Inspect the current target repository, owner edits, requirements, acceptance criteria, exclusions and authorized actions. Read primary artifacts in full where completeness matters. Gather topology, versions, lifecycle, configuration, dependencies, actual tests, prior attempts and known local gaps. Label unreviewed evidence instead of implying complete coverage. Candidate plans are challengeable, not authority.
 
-## 1. Recover or initialize the case
+Use one case branch and path in `GPT-Pro-Escalation`. Verify actual access and existing case state. Existing scoped authorization remains valid, but a repository name is not permission to create it, change visibility or export data. Prepare locally and checkpoint if a required remote action is blocked.
 
-Record the original local Codex task/session, target repository, requested outcome, acceptance criteria, exclusions, constraints, permission scope and observed baseline. Preserve owner edits. Reuse an existing case when this is a continuation; never create another chat merely because a process restarted.
+Select the independent Claude participant from the locally qualified Fable5.1-high and Opus5.5-high routes. Honor an explicit owner selection; otherwise CLM may advise only after deterministic subscription, availability and qualification checks. Use the verified baseline while CLM is shadow-only. Record the exact participant identity, effort, transport and private session/chat binding in a participant-binding digest. Fable5.5 is pending, not a silently upgraded alias.
 
-Use the repository named `GPT-Pro-Escalation`, one `case/<case-id>` branch and `cases/<case-id>/` path. Repository creation, privacy settings, pushes and exports need the applicable existing authorization; the repository name alone grants none. Prefer private visibility for real cases. Verify the actual Git write path with readback, not only a permission flag. If creation/access is blocked, prepare the local artifacts, checkpoint the missing action and do not claim a remote contribution.
+## Build the evidence package
 
-## 2. Build the evidence package
+Create `context.zip`, `MANIFEST.json`, `PROMPT.md` and a private runtime record. Use a stable snapshot with relevant dirty changes, explicit allowlisted files, exact attachment names and hashes. Reject traversal, symlinks and special files. Exclude passwords, tokens, recovery values, device identifiers, private chat URLs, browser profiles, unrelated files and unnecessary customer/topology data. Bind export approval to the actual bytes and destination. Hash the completed ZIP separately, not recursively inside itself.
 
-Inventory every in-scope component and supplied artifact. Read primary material in full when completeness matters. Cover model/tool versions, topology, lifecycle, configuration, dependencies, previous attempts, relevant code and tests, deployment constraints, and unknown local facts. Do not imply that unreviewed material was read.
+Separate direct observations, owner statements, current primary-source facts, candidate conclusions, inference, redactions and unresolved decisions in the manifest. CLM can suggest relevant context or gaps but cannot approve export or remove mandatory evidence. Count exact tokenizer budgets for local CLM; never let server truncation silently erase a requirement.
 
-Keep the manifest compact and separate:
+## Handoff and completion
 
-- direct observations, including commands and exact source revisions;
-- owner-stated requirements and environment facts;
-- current primary-source facts with citations;
-- candidate plans and prior reviewer conclusions, which remain challengeable;
-- inference, omissions, redactions and unresolved decisions.
+Resolve all template placeholders. Request a complete final solution, implementation/verification/rollback plan and concise decision ledger, not only a critique. Permit better alternatives; require citations for unstable claims and explicit conditional branches for owner choices that cannot be discovered. Do not request hidden chain-of-thought or arbitrary finding/iteration counts.
 
-Use explicit source-path allowlists and a stable snapshot including relevant dirty changes. Remove credentials, recovery values, unique device identifiers, unrelated files, personal/customer data and unnecessary internal topology. Reject traversal, symlinks and special files. Avoid copying opaque binaries or oversized logs without an explicit need. Local SemIf or local models may help find relevant evidence; their summaries do not replace exact sources and cannot approve export.
+Submit only through a currently permitted, verified transport. The shipped default is manual ZIP/prompt transfer. Conditional UI automation must verify account/origin, Pro selector, attachment readiness, exact case/turn marker and persistent same-chat binding. Reconcile an uncertain send before retrying. Do not bypass a platform restriction, use extracted credentials or silently substitute paid API access.
 
-Create `context.zip`, `PROMPT.md`, `MANIFEST.json` and a short private runtime record. The manifest names every attachment exactly, records included-file hashes and source classes, and declares what is missing. Hash the completed ZIP separately; do not include its own hash inside itself. Bind export approval to actual bytes, destination and data scope. Never put browser profiles, tokens or private conversation URLs in the ZIP or public repository.
+Pro should work in the exact authorized case branch/path. Native Git writing is preferred only when that chat really has it; otherwise retrieve downloadable model-authored artifacts and perform a labelled coordinator relay. Do not invent a Pro commit or rewrite conclusions under Pro's identity.
 
-## 3. Write the review contract
+Retrieve the actual complete contribution, validate allowed paths and expected input digests, and verify the durable commit by readback. A stopped spinner or narrative “done” is insufficient. Then automatically invoke `fable-adversarial-review` for this case and selected Claude identity. No additional owner request is needed when already authorized. Avoid recursively preparing a new case on each continuation.
 
-Use the handoff template. Ask for the complete final solution and implementation/validation plan, not only criticism. Candidate plans may be replaced with materially better alternatives. Require sourced checks for unstable claims, local-versus-remote evidence labels, concise decision/risk records, acceptance coverage and explicit branches for unresolved owner choices.
+## Validation
 
-Give Pro freedom to choose the analysis. Do not request hidden chain-of-thought, a fixed number of objections, or an arbitrary number of iterations. Preserve safety/privacy/authorization boundaries once. Design work does not authorize live configuration changes or implementation beyond the task's existing permissions.
-
-Resolve all placeholders and explicitly instruct Pro to work in the named review repository, branch and case path. A direct Git contribution is preferred **only if that chat actually has authorized write-capable tools**. Otherwise ask for exact downloadable files for a labelled coordinator relay. Do not present a relay as a Pro-authored Git push.
-
-## 4. Submit or prepare manual transfer
-
-First inspect the transport gate. The standard Computer Use documentation currently excludes automating ChatGPT itself. Do not bypass that restriction with another tool, browser, endpoint, local model or permission change.
-
-When the exact workflow has a documented, explicitly permitted, locally verified automation capability, use Codex's exposed Computer Use integration: verify origin/account and visible Pro selection, create the outbox record, attach the approved ZIP, wait for readiness, submit the resolved prompt once, confirm its case/turn marker and persist the exact conversation binding privately. Observe actual UI state; do not invent selectors or tool calls.
-
-Otherwise deliver the ready ZIP/prompt and attachment list for **manual** Pro web transfer, enter `WAIT_MANUAL_TRANSFER`, and request only the missing handoff action. For an existing case, target its already-bound chat. Do not claim automatic submission, silently use an API model or fabricate a response. An entirely unattended requirement remains blocked until the transport is qualified.
-
-## 5. Verify completion and activate Fable
-
-Monitor only through a real available foreground tool or configured local supervisor. Check meaningful lifecycle changes; never promise unconfigured background work. Reconcile uncertain sends before retrying. Respect rate limits, expired sessions, cancellation and platform prompts; preserve the same case/chat across a pause.
-
-When Pro completes, retrieve the actual result. Validate the expected case/turn, input digests, allowed file paths, all required deliverables, citations/evidence status and durable repository contribution (native or labelled relay). A stopped spinner or “done” message is insufficient. Record the role/transport receipt and output commit.
-
-Then **invoke `fable-adversarial-review` automatically** with that case, original task binding, Pro chat binding and exact input commit. Do not ask the owner to start the challenge again when already authorized. This skill stops at the handoff to the challenge coordinator; it must not recursively reinitialize itself on every Pro continuation.
-
-## Validation and delivery
-
-Verify exact attachment names and hashes, complete requirement/component coverage, no secrets or unrelated material, correct Pro target, explicit unknowns, working local reference links, nonconflicting permissions and an implementation-ready requested outcome. Report produced files, actual handoff mode, durable commit or pending transfer, and the next actor. Never claim model review, upload, push or skill installation without an actual receipt.
-
-For reusable/high-risk changes, forward-test with independent scoped agents and raw synthetic evidence. Give them only the permissions needed to write review-case artifacts, not to modify the target project or live machine. Offline fixture success is not an independent model review or a live integration test.
-
-## Optional local semantic support
-
-Where the local AgenticArch decision plane is installed and qualified, use SemIf to suggest relevant evidence, missing context, duplicated-but-preserved objections, useful diagnostics and possible local drift. Keep original evidence and participant turns accessible; suggestions are not proof or authority. Required manifest entries, complete source scope, permission gates, model selection and same-digest convergence cannot be filtered out or waived. Missing/unqualified SemIf support must not prevent the ordinary manual/evidence workflow.
+Check exact files/hashes, requirement coverage, provenance, unknowns, selected identities, authorization and working reference links. Record actual transfer mode, output commit or pending gate and next actor. Never claim upload, review, installation or a background job without an actual receipt. Reusable changes need scoped independent forward-testing with raw synthetic evidence; offline fixtures are not real model participation.
