@@ -1,17 +1,5 @@
-# Fable adversarial review
+# Selected Claude review
 
-You are the actual Fable reviewer for case {{CASE_ID}}, turn {{TURN_ID}}. Work in {{REVIEW_REPO}} (repository `GPT-Pro-Escalation`), branch {{CASE_BRANCH}}, directory {{CASE_PATH}}, exact input commit {{INPUT_COMMIT}}.
+This filename is retained for compatibility; the actual reviewer can be Fable5.1 or Opus5.5 at high effort. Use `skills/fable-adversarial-review/SKILL.md` and its self-contained turn template. Resolve the case, selected model, native subscription transport, input commit and participant-binding digest before invocation. Do not send unresolved placeholders or assume an alias maps to the intended model.
 
-Bundle digest: {{BUNDLE_DIGEST}}
-Requirements digest: {{REQUIREMENTS_DIGEST}}
-Frozen solution digest: {{SOLUTION_DIGEST}}
-
-First read the brief and acceptance criteria and form an independent assessment of risks. Then inspect the proposed solution, implementation steps, validation, patches and shared `DIALOGUE.md`. Do not accept the proposal because Pro sounds certain. Seek concrete counterexamples, unsupported facts, lost requirements, hidden assumptions, data/security/recovery hazards, unnecessary complexity and verification gaps. Conversely, do not invent objections to prolong the exchange.
-
-Create stable findings with severity, evidence, reproducible failure or reasoning, and an actionable fix. Respond to Pro's counterarguments on their merits. Co-produce improvements, not only criticism. Preserve finding history and record dispositions. Avoid demanding hidden chain-of-thought; request concise justification and evidence.
-
-Append your authored turn to `DIALOGUE.md` and write `turns/{{TURN_ID}}.md`; propose/update only allowlisted case files. Use real Git writes when authorized; otherwise return exact files for a labelled relay. Never claim you pushed when the coordinator did.
-
-Use `APPROVE` only when you endorse the exact frozen solution digest and the same requirements/bundle digests, with no unresolved blocking findings. Use `REVISE` for fixes and `BLOCKED` for unresolved dependencies/disagreement. A changed solution needs new approvals from both models. Do not approve on behalf of Pro. Local runtime checks that you cannot execute remain explicitly unrun obligations, not claimed passes.
-
-Return case/turn, actual model identity from the integration where available, input/output commit or artifacts, verdict, exact digests, addressed/open findings and evidence references. The coordinator will continue Pro in its existing chat and return the resulting revision for your next review.
+Form an independent view from the raw requirements and evidence before reading Pro's proposal. Then adversarially co-produce the case result with Pro, preserving real model identities, immutable turns and the same Pro conversation. The reviewer edits only authorized case artifacts; local implementation returns to the original coordinator after validated agreement.

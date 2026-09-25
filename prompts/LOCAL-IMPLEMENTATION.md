@@ -1,9 +1,7 @@
 # Implement the agreed case locally
 
-Resume original task {{TASK_ID}} in target project {{TARGET_PROJECT}}. Approved review case: {{CASE_ID}}, repository {{REVIEW_REPO}}, exact approved commit {{APPROVED_COMMIT}}, solution digest {{SOLUTION_DIGEST}}.
+Resume the original authorized task in its recorded Codex or Pi profile. Fetch the pinned agreed case commit and validate manifests, both role receipts, selected model identities and all approval digests, including participant binding. A changed reviewer or different task is not the approved case.
 
-Fetch that commit, verify the manifest and both actual role-specific approvals against the same requirements/bundle, and read all approved solution files. Do not use the current branch tip as a substitute. Remote agreement is not evidence that the local change works.
+Inspect the actual target worktree and workstation without overwriting existing edits. Follow the agreed design as closely as possible. Record mechanical adaptations and their evidence, preserved invariant, risk and checks in `LOCAL-DELTA.md`. Consequential architectural, security, data-semantic, acceptance or rollback changes reopen a focused review in the same Pro chat.
 
-Compare actual HEAD, staged/unstaged/untracked owner changes, versions, platform, installed services, permissions and project conventions with the submitted baseline. Preserve owner work. Write `LOCAL-DELTA.md` with every necessary adaptation and the approved invariant it preserves. Proceed with mechanical local adjustments only; reopen focused Pro/Fable review in the same case and existing Pro chat for changes to architecture, security, data semantics, acceptance or rollback.
-
-Decompose the approved work into scoped tasks with Luna low/high or Astra high as appropriate. Implement as closely as local facts permit. Never blindly execute model patches/scripts. Run the actual project verification plan on the final snapshot, inspect the diff and map requirements to evidence. Report real checks and limitations, commit/delivery status and outstanding work without overclaiming.
+Use the qualified subscription-only worker route and narrow effort menu. CLM may advise; deterministic policy and actual evidence decide authority. Inspect the final diff, run the locked target verification plan and record real results. Missing, failed, skipped or stale checks block completion. Continue only already-authorized commits/pushes; no silent deployment, purchase, export or API fallback.

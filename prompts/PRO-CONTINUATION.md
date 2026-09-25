@@ -1,13 +1,7 @@
-# Pro continuation — send in the case's existing chat
+# Continue the existing Pro case
 
-Case {{CASE_ID}}, turn {{TURN_ID}}. This is a continuation of the SAME review case. Do not create another conversation.
+Send this only after resolving the case's exact stored Pro conversation, not a new chat. Include case/turn ID, expected input commit, new evidence or an approved delta ZIP, unresolved findings, selected Claude identity and participant-binding digest. Verify attachment readiness and reconcile uncertain prior sends before retrying.
 
-Read {{REVIEW_REPO}} on branch {{CASE_BRANCH}} at exact commit {{INPUT_COMMIT}}, case path {{CASE_PATH}}. Current bundle digest: {{BUNDLE_DIGEST}}. Requirements digest: {{REQUIREMENTS_DIGEST}}. Current solution digest: {{SOLUTION_DIGEST}}. The newly attached approved delta package, when supplied, contains the exact current files; do not rely on stale chat attachments or stale Git indexing.
+Address every material reviewer finding with a fix, evidence-based rebuttal or explicit unresolved status. Challenge flaws in proposed remedies. Update complete solution, implementation, verification and rollback artifacts as needed, preserving immutable earlier turns. Append the new contribution to `DIALOGUE.md` and report exact bytes/commit or a labelled relay handoff.
 
-Read the latest `DIALOGUE.md`, Fable turn and findings. Address every blocking finding by a concrete fix or evidence-backed rebuttal; keep unresolved disagreements visible. Challenge weak assumptions in Fable's proposals as well. Prefer the smallest design that meets the brief; do not add complexity just to sound comprehensive. Support external factual claims with sources and distinguish proposed checks from executed checks.
-
-Update only authorized case files and append an immutable turn plus a shared-dialogue entry. Preserve objection IDs and history. Use native Git only if write access is actually available; otherwise return exact files for a labelled relay.
-
-If the current frozen solution needs no changes and you explicitly endorse it, return `APPROVE` with the exact solution, bundle and requirements digests. Otherwise return `REVISE` or `BLOCKED` and explain remaining findings. Never approve a future, uncomputed hash or claim consensus for Fable. If you change any included solution file, both approvals must be recollected on the new digest.
-
-End with case/turn, input/output commit or artifacts, verdict, addressed/open finding IDs and concise evidence references. Agreement is earned, not compulsory.
+Return APPROVE, REVISE or BLOCKED against the current solution, requirement, evidence and participant-binding digests. A changed identity or artifact invalidates prior approvals. Do not declare convergence on behalf of the other actual model. Preserve scoped permissions and distinguish unavailable local verification from work actually performed.
