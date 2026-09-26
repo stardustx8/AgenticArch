@@ -162,19 +162,19 @@ def mcnemar_p(win: int, loss: int) -> float:
     return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
 
 
-def report() -> None:
+def report(ref: str = 'baseline') -> None:
     rows = [json.loads(l) for f in sorted(RESULTS.glob('*.jsonl')) for l in open(f)]
     by = {}
     for r in rows:
         by.setdefault(r['variant'], {})[r['task']] = r      # latest run per task wins
-    base = by.get('baseline', {})
-    print(f'{"variant":24} {"n":>3} {"hidden pass":>11} {"vs baseline (paired)":>22} {"min":>6} '
+    base = by.get(ref, {})
+    print(f'{"variant":24} {"n":>3} {"hidden pass":>11} {"vs " + ref + " (paired)":>22} {"min":>6} '
           f'{"codex Mtok":>10} {"claude $eq":>10} {"pings":>6}')
     for v, tasks in sorted(by.items()):
         rs = list(tasks.values())
         n = len(rs)
         passed = sum(1 for r in rs if r['hidden_pass'])
-        paired = [t for t in tasks if t in base and v != 'baseline']
+        paired = [t for t in tasks if t in base and v != ref]
         win = sum(1 for t in paired if tasks[t]['hidden_pass'] and not base[t]['hidden_pass'])
         loss = sum(1 for t in paired if base[t]['hidden_pass'] and not tasks[t]['hidden_pass'])
         cmp = f'+{win}/-{loss} p={mcnemar_p(win, loss):.2f}' if paired else '-'
@@ -191,9 +191,10 @@ def main() -> int:
     ap.add_argument('--parallel', type=int, default=3)
     ap.add_argument('--timeout', type=int, default=2700)
     ap.add_argument('--report', action='store_true')
+    ap.add_argument('--ref', default='baseline', help='variant the report compares against')
     a = ap.parse_args()
     if a.report:
-        report()
+        report(a.ref)
         return 0
     flags = json.loads(a.flags)
     tasks = sorted(d for d in (LAB / 'tasks').iterdir()
