@@ -23,3 +23,20 @@ judges each acceptance criterion against the diff; unmet criteria go back to the
 worker lane with the judge's reason; the worker may rebut; at most 2 spec loops, then
 the owner decides. A tuned-on-test SemIf gate looked like it saved 43% of judge calls;
 re-tuned on dev only it saves 5% — a reminder why wording/thresholds are chosen on dev.
+
+## Threshold calibration: environment vs code (2026-09-26)
+
+Saved SemIf probabilities (`20260925-1822-probes.json`, question "cause"), environment =
+top answer with confidence >= threshold. Chosen on dev (n=45, 15 env), reported on test (n=45, 15 env):
+
+| threshold | dev F1 / false alarms / misses | test F1 / false alarms / misses |
+| --- | --- | --- |
+| 0.5 (old) | 0.87 / 2 / 2 | 0.91 / 3 / 0 |
+| **0.7 (dev best, adopted)** | 0.90 / 1 / 2 | 0.91 / 3 / 0 |
+| 0.95 | 0.85 / 0 / 4 | 0.90 / 1 / 2 |
+
+The remaining false alarms are not borderline: missing in-repo modules / undefined symbols
+("No module named 'shop.billing.tax_utils'", linker errors) get 0.96 "environment". No threshold
+fixes these; context does (e.g. the files the worker changed: a missing module inside the repo is
+code). Labels were re-read; no labelling errors found. Most "flaky" rows are caught live by the
+deterministic rerun before SemIf is asked.

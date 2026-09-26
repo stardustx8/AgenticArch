@@ -119,7 +119,7 @@ DEFAULTS: dict[str, Any] = {
         # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),
         # local decider flags environment problems (pause + ask owner) — eval/PROBES.md.
         'enabled': True,
-        'min_confidence': 0.5,
+        'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
     'spec_check': {
         # After the checks pass, an independent reviewer judges every acceptance criterion
