@@ -13,6 +13,10 @@
 - `aa doctor`: both subscriptions, CLM, ntfy, private case-repo access all OK.
 
 - Spec-check loop: Opus 5.5 judges acceptance criteria after checks; max 3 loops, then owner (D017).
+- Failure triage (D019), live 2026-09-26: task t0926-06034 — Luna low implemented, a DB check
+  failed, SemIf said ENVIRONMENT, task paused with ntfy buttons (no retry, no escalation);
+  after the environment was fixed and `retry` sent, checks + Opus spec review passed, delivered.
+- Claude workers: auto-mode classifier + hard denies, no MCP connectors (D018).
 
 ## Implemented, tested offline, not yet exercised live
 
