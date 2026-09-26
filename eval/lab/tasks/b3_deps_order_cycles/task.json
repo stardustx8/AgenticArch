@@ -1,0 +1,5 @@
+{
+ "id": "b3_deps_order_cycles",
+ "tier_hint": "medium_tough",
+ "prompt": "There are two problems in deps. First, execution_order() needs to be deterministic in a specific way: whenever several tasks are ready, run the alphabetically smallest first, which gives the lexicographically smallest valid order. The current DFS doesn't do that. Second, CycleError is useless on big graphs because `.cycle` lists every task on the DFS stack. It should hold one actual cycle as a path where each task depends on the next, starting and ending with the cycle's alphabetically smallest task (e.g. ['b', 'c', 'b'] when b depends on c and c on b); batches() should behave the same way."
+}

@@ -1,0 +1,5 @@
+{
+ "id": "b2_warehouse_reservations",
+ "tier_hint": "medium_tough",
+ "prompt": "Add reservations to `Warehouse`: `reserve(order_id, lines, ttl)` holds stock for an order (`lines` is `{sku: qty}`, all lines or none \u2014 if any line exceeds available stock raise the existing `OutOfStock` and hold nothing), and `available(sku)` must exclude active holds while `on_hand` stays the same until commit. `commit(order_id)` turns the hold into a real deduction and `release(order_id)` gives it back. Holds expire once the clock reaches reserve time + `ttl`; expired holds free their stock automatically and committing one raises `ReservationExpired`. Reserving an order id that already has an active hold, or committing/releasing an unknown one, raises `ReservationError` (`ReservationExpired` subclasses it; put both in `depot/errors.py`), and a non-positive `ttl` or line quantity is a `ValueError`. Also, direct `ship()` calls must not eat into held stock."
+}

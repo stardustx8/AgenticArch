@@ -21,6 +21,12 @@ Rules:
 - Only NEW test files, in the repository's test directory, with names that do not exist yet
   (use a name ending in _indep, e.g. tests/test_<feature>_indep.py). Write complete,
   syntactically valid files.
-- command: one shell command, run from the repository root, that runs exactly your new tests.
 $owner_answers
-Return the JSON object required by the output schema.
+Output format (plain text, no JSON). For each new test file:
+FILE: <path>
+```
+<complete file content>
+```
+Then one final line with a shell command, run from the repository root, that runs exactly
+your new tests:
+COMMAND: <command>

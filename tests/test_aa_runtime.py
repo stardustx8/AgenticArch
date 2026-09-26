@@ -99,6 +99,10 @@ def _kind(log_name: str) -> str:
         return 'spec'
     if log_name.endswith('-oracle'):
         return 'oracle'
+    if log_name.endswith('-map'):
+        return 'map'
+    if log_name.endswith('-attack'):
+        return 'attack'
     if '-pick-' in log_name:
         return 'pick'
     if '-race-' in log_name:
@@ -127,7 +131,7 @@ def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'
 
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True, oracle=False, best_of_2=False, local=False):
+                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -150,6 +154,7 @@ class Env:
             'oracle_tests': {'enabled': oracle},
             'best_of_2': {'enabled': best_of_2},
             'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
+            'ideas': ideas or {},
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -1006,14 +1011,15 @@ class WorkerTests(unittest.TestCase):
 
     def test_local_model_truncated_output_is_a_failure(self):
         import io
-        body = json.dumps({'choices': [{'finish_reason': 'length', 'message': {'content': '{"files": [' + ' ' * 50}}]})
+        body = json.dumps({'choices': [{'finish_reason': 'stop', 'stop_reason': 'repetition_detected',
+                                        'message': {'content': 'a-b-a-b-a-b'}}]})
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch('urllib.request.urlopen', return_value=io.BytesIO(body.encode())):
             w = Workers(self.cfg(tmp))
             w.verify_billing = lambda cli: None
             r = w.execute(LANES['gemma_local'], 'p', Path(tmp), write=False, schema={'type': 'object'})
         self.assertFalse(r.ok)
-        self.assertIn('token limit', r.error)
+        self.assertIn('degenerated', r.error)
 
     def test_codex_command_is_subscription_exec_with_effort(self):
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
@@ -1310,10 +1316,20 @@ class LocalModelTests(unittest.TestCase):
     def oracle_both(local_files):
         def fn(lane, cwd, prompt, extra):
             if lane.cli == 'local':
-                return Result(True, '{}', {'files': local_files, 'command': 'sh tests/check_indep.sh', 'notes': ''},
-                              [lane.model])
+                text = ''.join(f"FILE: {f['path']}\n```sh\n{f['content'].rstrip()}\n```\n\n" for f in local_files)
+                return Result(True, text + 'COMMAND: sh tests/check_indep.sh\n', None, [lane.model])
             return oracle_writer()(lane, cwd, prompt, extra)
         return fn
+
+    def test_parse_fenced_files(self):
+        from aa.quality import parse_fenced_files
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))
+        text = ('Here are the tests.\nFILE: tests/test_a_indep.py\n```python\nimport x\n\ndef test():\n    '
+                'assert x\n```\nFILE: `tests/test_b_indep.py`\n```\npass\n```\nCOMMAND: `python3 -m pytest -q`\n')
+        files, cmd = parse_fenced_files(text)
+        self.assertEqual([f['path'] for f in files], ['tests/test_a_indep.py', 'tests/test_b_indep.py'])
+        self.assertIn('def test():', files[0]['content'])
+        self.assertEqual(cmd, 'python3 -m pytest -q')
 
     def test_single_lane_gets_extra_local_test_set(self):
         files = [{'path': 'tests/check_indep.sh', 'content': 'test -f done.txt\n'},
@@ -1372,3 +1388,81 @@ class LocalModelTests(unittest.TestCase):
         t = self._split_env(always_a)
         self.assertEqual(t['lane'], 'astra_high', 'inconsistent across orders -> smaller diff')
         self.assertEqual(len(set(t['data']['tiebreak_votes'])), 2)
+
+
+class IdeaFlagTests(unittest.TestCase):
+    """Experimental ideas (config 'ideas'), each off by default and testable in the lab."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        self.env.close()
+        self._tmp.cleanup()
+
+    def _run(self, script, ideas, **kw):
+        prompts = {'work': [], 'spec': []}
+
+        def work(lane, cwd, prompt, extra):
+            prompts['work'].append(prompt)
+            return script.get('work', write_done)(lane, cwd, prompt, extra)
+
+        def judge(lane, cwd, prompt, extra):
+            prompts['spec'].append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        full = {'triage': triage('bounded'), 'work': work, 'spec': judge, **{k: v for k, v in script.items() if k != 'work'}}
+        self.env = Env(self.tmp, full, FakeCLM('bounded'), ideas=ideas, **kw)
+        tid = self.env.app.tasks.create(self.env.target, 'fix the bug')
+        self.env.run(60)
+        return self.env.db.task(tid), prompts
+
+    def test_all_ideas_off_by_default(self):
+        t, p = self._run({}, {})
+        self.assertEqual(t['status'], 'DONE')
+        self.assertNotIn('Order of authority', p['work'][0])
+        self.assertNotIn('defect pattern', p['work'][0])
+
+    def test_authority_order_and_defect_twins_reach_the_worker(self):
+        t, p = self._run({}, {'authority_order': True, 'defect_twins': True})
+        self.assertIn('Order of authority', p['work'][0])
+        self.assertIn('same defect pattern', p['work'][0])
+
+    def test_spec_conflicts_reach_the_judge(self):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, '{}', {'status': 'done', 'summary': 's', 'open_items': [], 'question': '',
+                                       'rebuttals': [], 'spec_conflicts': ['test expects 400 but task says 422']},
+                          [lane.model])
+        t, p = self._run({'work': work}, {'authority_order': True})
+        self.assertIn('test expects 400 but task says 422', p['spec'][0])
+
+    def test_impact_map_is_shared_with_worker(self):
+        mapper = lambda lane, cwd, prompt, extra: Result(True, '', {'files': ['app.py: entry'], 'symbols': [],
+                                                                  'patterns': [], 'pitfalls': ['off by one']},
+                                                         [lane.model])
+        t, p = self._run({'map': mapper}, {'impact_map': True})
+        self.assertEqual(t['status'], 'DONE')
+        self.assertIn('off by one', p['work'][0])
+        self.assertIn(('luna_low', f'{t["id"]}-map'), self.env.workers.calls)
+
+    def test_diff_audit_flags_debug_prints_and_test_edits(self):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            (cwd / 'app.py').write_text('print(1)\nprint("debug")\n')
+            (cwd / 'tests').mkdir(exist_ok=True)
+            (cwd / 'tests' / 'test_x.py').write_text('x')
+            return Result(True, 'done', None, [lane.model])
+        t, p = self._run({'work': work}, {'diff_audit': True})
+        audit = t['data']['audit']
+        self.assertTrue(any('debug statement added in app.py' in a for a in audit), audit)
+        self.assertIn('Deterministic diff audit findings', p['spec'][0])
+
+    def test_attacker_failing_test_is_evidence_for_judge(self):
+        attack = lambda lane, cwd, prompt, extra: Result(
+            True, 'FILE: tests/test_attack_x.py\n```\nimport sys\nsys.exit(1)\n```\nCOMMAND: python3 tests/test_attack_x.py\n',
+            None, [lane.model])
+        t, p = self._run({'attack': attack, 'local': True}, {'attacker': True}, local=True)
+        self.assertEqual(len(t['data']['attack']), 1)
+        self.assertIn('adversarial test written by an independent model FAILS', p['spec'][0])
+        self.assertFalse((self.env.cfg.worktrees / t['id'] / 'tests' / 'test_attack_x.py').exists())

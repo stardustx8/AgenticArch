@@ -1,0 +1,5 @@
+{
+ "id": "b2_token_bucket_refill",
+ "tier_hint": "bounded",
+ "prompt": "Clients polling every 250ms against a 2 tokens/sec `TokenBucket` never get tokens back once they drain it \u2014 looks like partial refills are being thrown away. Fix the refill so tokens accrue continuously (fractional tokens internally are fine, and `available()` / `time_until()` should reflect them), still capped at capacity. While you're in there, `try_acquire(n)` should raise ValueError for n <= 0 or n > capacity instead of quietly returning False."
+}

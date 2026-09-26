@@ -1,0 +1,5 @@
+{
+ "id": "b3_business_days_back",
+ "tier_hint": "bounded",
+ "prompt": "add_business_days() currently refuses negative n, but we need it to step backwards too. For example, -1 from a Monday is the previous Friday, and holidays are skipped. business_days_between() should also handle an end date before the start by returning a negative count. Then add_business_days(start, business_days_between(start, end)) == end whenever end is a business day. n=0 should keep returning start unchanged."
+}

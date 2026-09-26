@@ -1,0 +1,5 @@
+{
+ "id": "b2_ledger_decimal_money",
+ "tier_hint": "bounded",
+ "prompt": "Balances drift because we store floats (0.1 + 0.2 and friends). Switch `pennybank` accounts to `Decimal` money: `deposit`/`withdraw` should accept `Decimal`, `int` or numeric strings, reject floats with `TypeError`, and raise `ValueError` for anything non-positive, non-finite, non-numeric or with more than two decimal places. `balance()` and history amounts should be `Decimal`s with exactly two places, and `apply_monthly_fee` should round the fee half-up to the cent."
+}

@@ -1,0 +1,5 @@
+{
+ "id": "b1_csv_quoted_contacts",
+ "tier_hint": "bounded",
+ "prompt": "The contacts importer splits lines on commas by hand, so a row like `\"Smith, John\",john@example.com` gets mangled. Make read_contacts handle proper CSV quoting (commas, doubled `\"\"` quotes and newlines inside quoted fields). Also, Excel exports start with a UTF-8 BOM that ends up glued to the first header name \u2014 strip it."
+}

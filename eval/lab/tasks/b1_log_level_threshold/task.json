@@ -1,0 +1,5 @@
+{
+ "id": "b1_log_level_threshold",
+ "tier_hint": "bounded",
+ "prompt": "filter_by_level only keeps entries whose level exactly equals min_level; it should work as a threshold (DEBUG < INFO < WARNING < ERROR < CRITICAL) and keep that level plus anything more severe. The payments service logs lowercase levels and uses WARN and FATAL \u2014 treat those as WARNING/CRITICAL, case-insensitively, both in the entries and in the min_level argument. Drop entries whose level we don't recognise, and raise ValueError for an unrecognised min_level."
+}

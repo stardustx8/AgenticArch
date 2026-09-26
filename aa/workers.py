@@ -196,7 +196,12 @@ class Workers:
         """Loopback OpenAI-compatible chat call with schema-constrained output (no tools)."""
         import urllib.request
         body = {'model': self.local['model'], 'messages': [{'role': 'user', 'content': prompt}],
-                'temperature': 0.2, 'max_tokens': int(self.local.get('max_tokens', 8192))}
+                'max_tokens': int(self.local.get('max_tokens', 4096)),
+                # Known Gemma 4 / grammar looping (vllm#40080): stop early instead of running to max_tokens.
+                'repetition_detection': {'max_pattern_size': 20, 'min_pattern_size': 1, 'min_count': 6},
+                **self.local.get('sampling', {'temperature': 0.2})}
+        if self.local.get('chat_template_kwargs'):
+            body['chat_template_kwargs'] = self.local['chat_template_kwargs']
         if schema is not None:
             body['response_format'] = {'type': 'json_schema',
                                        'json_schema': {'name': 'result', 'schema': schema, 'strict': True}}
@@ -209,8 +214,8 @@ class Workers:
             return Result(False, '', error=f'local model error: {exc}')
         choice = (data.get('choices') or [{}])[0]
         text = (choice.get('message', {}).get('content') or '').strip()
-        if choice.get('finish_reason') == 'length':
-            return Result(False, text, error='local model hit the token limit (degenerate output)')
+        if choice.get('finish_reason') == 'length' or choice.get('stop_reason') == 'repetition_detected':
+            return Result(False, text, error='local model output degenerated (repetition / token limit)')
         log.write_text(f'local {self.local["model"]}\n--- prompt\n{prompt[-4000:]}\n--- answer\n{text}')
         structured = _json_or_none(text) if schema is not None else None
         ok = bool(text.strip()) and (schema is None or structured is not None)

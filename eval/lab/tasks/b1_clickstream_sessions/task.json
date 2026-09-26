@@ -1,0 +1,5 @@
+{
+ "id": "b1_clickstream_sessions",
+ "tier_hint": "medium_tough",
+ "prompt": "sessionize() assumes events arrive sorted by time, but our collectors deliver them out of order and we get broken sessions. It also can't handle timestamps with UTC offsets (`2024-05-01T12:00:00+02:00`) \u2014 normalise all timestamps to UTC (no offset means UTC). A gap of exactly gap_minutes should still count as the same session, and sessions should come back ordered by start time, then user. Also, one malformed line currently kills parse_events: skip bad lines instead, and if the caller passes `errors=[]`, append the 1-based line numbers of the skipped ones (blank lines are fine, not errors)."
+}

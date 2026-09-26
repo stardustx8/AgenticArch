@@ -1,0 +1,5 @@
+{
+ "id": "b3_interval_nesting",
+ "tier_hint": "bounded",
+ "prompt": "The room-booking report is wrong for some rooms. total_covered() under-counts booked time, and gaps() shows free slots in the middle of all-day blocks. An example is a 9-17 block with a 10-11 meeting inside it. Can you track down and fix it?"
+}

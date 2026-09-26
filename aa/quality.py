@@ -15,6 +15,7 @@ candidate pools raise the chance that a correct fix exists; selection is the bot
 """
 from __future__ import annotations
 
+import json
 import random
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -69,6 +70,9 @@ class QualityMixin:
         self._start_after_oracle(t)
 
     def _start_after_oracle(self, t: dict) -> None:
+        if self._idea('impact_map') and 'impact_map' not in t['data']:
+            self.db.update_task(t['id'], data=t['data'], status='MAP')
+            return
         if t['data'].get('mode') == 'race':
             self.db.update_task(t['id'], data=t['data'], status='RACE')
         else:
@@ -76,6 +80,74 @@ class QualityMixin:
 
     def _start_commit(self, t: dict) -> str:
         return (t['data'].get('oracle') or {}).get('commit') or t['base_ref']
+
+    # ------------------------------------------------------------ ideas (flags)
+    def _idea(self, name: str) -> bool:
+        return bool(self.cfg['ideas'].get(name, False))
+
+    def _idea_notes(self, t: dict) -> str:
+        notes = []
+        if self._idea('authority_order'):
+            notes.append('Order of authority: the owner\'s task statement > the acceptance criteria > tests > '
+                         'existing code. Never bend code to satisfy a test that contradicts the task; report such '
+                         'contradictions in `spec_conflicts` instead.')
+        if self._idea('defect_twins'):
+            notes.append('If you fix a bug, search the repository for the same defect pattern elsewhere (same '
+                         'mistake in sibling functions or call sites), fix those too and mention them in the summary.')
+        m = t['data'].get('impact_map')
+        if m:
+            notes.append('Impact map from a quick scan (verify before relying on it):\n' +
+                         json.dumps(m, indent=1)[:4000])
+        return ('\n' + '\n\n'.join(notes) + '\n') if notes else ''
+
+    def _map(self, t: dict) -> None:
+        """Cheap read-only scan shared by the implementer(s) (idea: impact_map)."""
+        from .tasks import bullet, render
+        tri = t['data'].get('triage') or {}
+        prompt = render('impact_map.md', prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')))
+        try:
+            res = self.workers.execute(LANES['luna_low'], prompt, Path(t['repo']), write=False, schema=MAP_SCHEMA,
+                                       log_name=f'{t["id"]}-map')
+            t['data']['impact_map'] = res.structured if res.ok and res.structured else {}
+        except BillingError:
+            t['data']['impact_map'] = {}
+        self.db.update_task(t['id'], data=t['data'])
+        self._start_after_oracle(self.db.task(t['id']))
+
+    def _post_check_ideas(self, t: dict, wt: Path) -> None:
+        start = t['base_ref']
+        if self._idea('diff_audit'):
+            t['data']['audit'] = diff_audit(wt, start, (t['data'].get('oracle') or {}).get('files', []))
+            self.db.event('diff_audit', t['id'], findings=t['data']['audit'][:10])
+        if self._idea('attacker') and self._local_ok('gemma_local'):
+            t['data']['attack'] = self._attack(t, wt)
+        self.db.update_task(t['id'], data=t['data'])
+
+    def _attack(self, t: dict, wt: Path) -> list[dict]:
+        """Local model writes adversarial tests; failing ones become evidence for the spec judge."""
+        from .tasks import bullet, render
+        start = t['base_ref']
+        changed = [f for f in git.git(wt, 'diff', '--name-only', f'{start}..HEAD', check=False).splitlines()
+                   if f.endswith(SOURCE_EXT) and not _is_test_path(f)]
+        ctx = '\n\n'.join(f'--- {f}\n{(wt / f).read_text(errors="replace")[:6000]}' for f in changed[:5] if (wt / f).exists())
+        prompt = render('attacker.md', prompt=t['prompt'],
+                        acceptance=bullet((t['data'].get('triage') or {}).get('acceptance_criteria')), context=ctx)
+        try:
+            res = self.workers.execute(LANES['gemma_local'], prompt, wt, write=False, log_name=f'{t["id"]}-attack')
+        except BillingError:
+            return []
+        files, cmd = parse_fenced_files(res.text) if res.ok else ([], '')
+        findings = []
+        if files and cmd:
+            _write_local_tests(wt, files[:1])
+            if not _syntax_error(wt, files[0]['path']):
+                r = checks_mod.run({'attack': cmd}, wt, timeout=300)[0]
+                if not r.ok and not SYNTAX_RE.search(r.output):
+                    findings.append({'file': files[0]['path'], 'test': files[0]['content'][:3000],
+                                     'output': r.output[-2000:]})
+        git.discard(wt)
+        self.db.event('attacker', t['id'], failing=len(findings))
+        return findings
 
     # --------------------------------------------------------- oracle tests
     def _oracle(self, t: dict) -> None:
@@ -134,13 +206,17 @@ class QualityMixin:
             repair = (f'\nYour previous tests were rejected: {problem}\nFix them.\n' if problem else '')
             try:
                 res = self.workers.execute(LANES[author], prompt + repair, wt,
-                                           schema=LOCAL_ORACLE_SCHEMA if local else ORACLE_SCHEMA,
+                                           schema=None if local else ORACLE_SCHEMA,
                                            log_name=f'{t["id"]}-{author}' + ('' if attempt == 1 else '-repair') + '-oracle')
             except BillingError as exc:
                 self.db.event('oracle_skipped', t['id'], author=author, reason=f'billing: {exc}'[:300])
                 break
-            if local and res.ok and res.structured:
-                _write_local_tests(wt, res.structured.get('files') or [])
+            if local and res.ok:
+                # Code travels in fenced blocks, not JSON strings (grammar-constrained code loops on
+                # Gemma 4 and code-in-JSON lowers quality); the coordinator parses and writes it.
+                files, command = parse_fenced_files(res.text)
+                _write_local_tests(wt, files)
+                res.structured = {'test_files': [f['path'] for f in files], 'command': command, 'notes': ''}
             verdict, problem = self._validate_oracle(t, wt, res)
             if verdict or not problem.startswith('invalid'):
                 break
@@ -249,6 +325,17 @@ class QualityMixin:
                          'equivalent, i.e. not change behaviour; check which ones would):\n' +
                          '\n'.join(f'  - {s}' for s in m['survivors']) +
                          '\nJudge the criteria from the code itself, not from the passing tests.')
+        if t['data'].get('audit'):
+            notes.append('Deterministic diff audit findings (check whether each is justified by the task):\n' +
+                         '\n'.join(f'  - {a}' for a in t['data']['audit'][:15]))
+        if t['data'].get('attack'):
+            a = t['data']['attack'][0]
+            notes.append('An adversarial test written by an independent model FAILS on this implementation. It '
+                         'may be wrong itself: decide whether it tests a real requirement; if so, the related '
+                         f'criterion is unmet.\nTest ({a["file"]}):\n{a["test"][:2500]}\nFailure:\n{a["output"][-1500:]}')
+        if t['data'].get('spec_conflicts'):
+            notes.append('The implementer reported conflicts between task, criteria and tests:\n' +
+                         '\n'.join(f'  - {c}' for c in t['data']['spec_conflicts'][:10]))
         if t['data'].get('oracle_dropped'):
             notes.append('The independent acceptance tests were dropped as invalid (' + t['data']['oracle_dropped'][:300] +
                          '). Verify the criteria from the code itself.')
@@ -278,6 +365,7 @@ class QualityMixin:
             acceptance=bullet(tri.get('acceptance_criteria')),
             paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
             checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none configured)'),
+            ideas=self._idea_notes(t),
             previous=self._oracle_worker_note(t) + (
                 f'\nAn earlier attempt by another model failed; its feedback:\n{t["data"]["last_failure"]}\n'
                 if t['data'].get('last_failure') else ''),
@@ -558,3 +646,46 @@ def _repo_context(wt: Path, relevant: list[str], budget: int = 24000) -> str:
     listing = '\n'.join(tracked[:200])
     return (f'All tracked files:\n{listing}\n\n' +
             '\n\n'.join(f'--- {p}{" (example test)" if p == example else ""}\n{text}' for p, text in parts))
+
+
+def parse_fenced_files(text: str) -> tuple[list[dict], str]:
+    """Parse 'FILE: path' + fenced block pairs and a final 'COMMAND: ...' line."""
+    files = [{'path': m.group(1).strip().strip('`'), 'content': m.group(2) + '\n'}
+             for m in re.finditer(r'^FILE:\s*(\S+)\s*\n```[^\n]*\n(.*?)\n```', text, re.M | re.S)]
+    cmd = re.findall(r'^COMMAND:\s*(.+?)\s*$', text, re.M)
+    return files, (cmd[-1].strip('`') if cmd else '')
+
+
+MAP_SCHEMA = {
+    'type': 'object', 'additionalProperties': False, 'required': ['files', 'symbols', 'patterns', 'pitfalls'],
+    'properties': {k: {'type': 'array', 'items': {'type': 'string'}} for k in ('files', 'symbols', 'patterns', 'pitfalls')},
+}
+DEP_FILES = ('requirements', 'pyproject.toml', 'setup.py', 'setup.cfg', 'package.json', 'go.mod', 'Cargo.toml',
+             'Gemfile', 'pom.xml', 'build.gradle')
+DEBRIS = re.compile(r'(\.(orig|rej|bak|tmp|log|swp)$|(^|/)(scratch|tmp|debug|untitled)[^/]*$)', re.I)
+DEBUG_LINE = re.compile(r'^\+(?!\+\+).*(\bprint\(|console\.log\(|breakpoint\(\)|import pdb|pdb\.set_trace|'
+                        r'debugger;|dbg!\(|fmt\.Println\("DEBUG)')
+
+
+def diff_audit(wt: Path, start: str, oracle_files: list[str]) -> list[str]:
+    """Deterministic scope/debris audit of the change (idea: diff_audit). No model involved."""
+    out = []
+    status = git.git(wt, 'diff', '--name-status', f'{start}..HEAD', check=False).splitlines()
+    for line in status:
+        parts = line.split('\t')
+        if len(parts) < 2:
+            continue
+        code, path = parts[0][0], parts[-1]
+        if _is_test_path(path) and path not in oracle_files and code in 'MD':
+            out.append(f'existing test file {"deleted" if code == "D" else "modified"}: {path}')
+        if any(path.rsplit('/', 1)[-1].startswith(d) for d in DEP_FILES):
+            out.append(f'dependency manifest changed: {path}')
+        if code == 'A' and DEBRIS.search(path):
+            out.append(f'possible debris file added: {path}')
+    for f in git.git(wt, 'diff', '--name-only', f'{start}..HEAD', check=False).splitlines():
+        if _is_test_path(f) or not f.endswith(SOURCE_EXT):
+            continue
+        for ln in git.git(wt, 'diff', '-U0', f'{start}..HEAD', '--', f, check=False, strip=False).splitlines():
+            if DEBUG_LINE.search(ln):
+                out.append(f'debug statement added in {f}: {ln[1:].strip()[:100]}')
+    return out

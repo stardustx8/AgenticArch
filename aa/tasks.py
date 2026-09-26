@@ -56,12 +56,13 @@ TRIAGE_SCHEMA = {
     },
 }
 
-ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'RACE', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
+ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
 
 WORKER_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['status', 'summary', 'open_items', 'question', 'rebuttals'],
+    'required': ['status', 'summary', 'open_items', 'question', 'rebuttals', 'spec_conflicts'],
     'properties': {
+        'spec_conflicts': {'type': 'array', 'items': {'type': 'string'}},
         'status': {'type': 'string', 'enum': ['done', 'partial', 'blocked']},
         'summary': {'type': 'string'},
         'open_items': {'type': 'array', 'items': {'type': 'string'}},
@@ -91,13 +92,13 @@ def worker_report(res) -> dict:
         return {'status': s['status'], 'summary': str(s.get('summary', '')),
                 'open_items': [str(x) for x in s.get('open_items') or []],
                 'question': str(s.get('question', '')), 'rebuttals': [str(x) for x in s.get('rebuttals') or []],
-                'from_schema': True}
+                'spec_conflicts': [str(x) for x in s.get('spec_conflicts') or []], 'from_schema': True}
     lines = res.text.splitlines()
     blocked = next((ln for ln in lines if ln.startswith('BLOCKED:')), None)
     return {'status': 'blocked' if blocked else 'done', 'summary': res.text,
             'open_items': [], 'question': blocked[len('BLOCKED:'):].strip() if blocked else '',
             'rebuttals': [ln.strip() for ln in lines if ln.strip().startswith('REBUTTAL:')],
-            'from_schema': False}
+            'spec_conflicts': [], 'from_schema': False}
 
 
 def render(name: str, **values: object) -> str:
@@ -125,6 +126,7 @@ class TaskFlow(QualityMixin):
 
     def step(self, t: dict) -> None:
         handler = {'NEW': self._triage, 'TRIAGED': self._route, 'ORACLE': self._oracle, 'RACE': self._race,
+                   'MAP': self._map,
                    'READY': self._work,
                    'VERIFY': self._verify, 'SPEC': self._spec_check,
                    'DELIVER': self._deliver}.get(t['status'])
@@ -321,7 +323,7 @@ class TaskFlow(QualityMixin):
                         paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
                         checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()],
                                       '- (none configured)'),
-                        previous=previous, owner_answers=owner_answers)
+                        previous=previous, owner_answers=owner_answers, ideas=self._idea_notes(t))
         try:
             res = self.workers.execute(lane, prompt, wt, schema=WORKER_SCHEMA, log_name=t['id'])
         except BillingError as exc:
@@ -337,6 +339,10 @@ class TaskFlow(QualityMixin):
              'error': res.error[:500], 'status': report['status'], 'summary': report['summary'][-1500:]})
         if report['rebuttals']:
             t['data']['rebuttals'] = report['rebuttals'][:10]
+        if report['spec_conflicts']:
+            t['data']['spec_conflicts'] = report['spec_conflicts'][:10]
+            if self._oracle_disputed(t, report['spec_conflicts']):   # conflicts with the oracle = dispute
+                t['data']['rebuttals'] = (t['data'].get('rebuttals') or []) + report['spec_conflicts'][:5]
         self.db.update_task(t['id'], passes=passes, lane_passes=lane_passes, data=t['data'])
         if report['status'] == 'blocked':
             self._ask_owner(t, report['question'] or report['summary'])
@@ -407,6 +413,8 @@ class TaskFlow(QualityMixin):
         if not failed:
             self.db.update_task(t['id'], data=t['data'])     # persist check notes before the gate reloads
             self._mutation_gate(t, wt)
+            t = self.db.task(t['id'])
+            self._post_check_ideas(t, wt)                    # diff audit / attacker (flags)
             t = self.db.task(t['id'])
             self.db.decision_outcome(t['id'], 'tier', 'pass')
             self.db.decision_outcome(t['id'], 'best_of_2', 'pass')

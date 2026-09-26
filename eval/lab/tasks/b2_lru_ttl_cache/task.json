@@ -1,0 +1,5 @@
+{
+ "id": "b2_lru_ttl_cache",
+ "tier_hint": "bounded",
+ "prompt": "Our LRUCache needs optional expiry. Add a `ttl` (seconds) argument to `set()` and a `default_ttl` to the constructor (None means never expire); an entry is gone once the clock reaches the time it was set plus its ttl, and re-setting a key replaces both its value and its expiry. Expired entries should behave as if they were never there: `get` returns the default (and counts as a miss), `in` is False, and `len()`/`keys()` don't include them. When the cache is full, drop expired entries before evicting anything live, and reject a ttl or default_ttl <= 0 with ValueError. Use the injected clock, not time directly."
+}

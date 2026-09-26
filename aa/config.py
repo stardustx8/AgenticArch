@@ -81,7 +81,11 @@ DEFAULTS: dict[str, Any] = {
         'url': 'http://127.0.0.1:8100',
         'model': 'gemma-4-31b',
         'timeout_s': 600,
-        'max_tokens': 8192,
+        'max_tokens': 4096,
+        # Google's recommended sampling measured best for Gemma 4 test writing (92% vs 88% valid at t=0.2;
+        # eval/results/local-llm-bench.jsonl).
+        'sampling': {'temperature': 1.0, 'top_p': 0.95, 'top_k': 64},
+        'chat_template_kwargs': {},
     },
     'oracle_tests': {
         # Independent acceptance tests before implementation (other vendor than the implementer),
@@ -100,6 +104,14 @@ DEFAULTS: dict[str, Any] = {
         'on_escalation': True,          # a Luna task that exhausted its retries races both
         'judge_lanes': ['opus_medium', 'astra_high'],   # both vendors judge; split -> tie-break
         'tiebreak_lane': 'gemma_local',                  # neutral third family, judged in both orders
+    },
+    'ideas': {
+        # Experimental ideas under A/B test in the harness lab (tools/lab.py); all off = baseline.
+        'diff_audit': False,        # deterministic audit: test edits, new deps, debug prints, debris
+        'authority_order': False,   # owner > criteria > tests > code; workers report spec_conflicts
+        'impact_map': False,        # Luna-low impact map shared by the implementer(s)
+        'attacker': False,          # local model writes adversarial tests after checks pass
+        'defect_twins': False,      # bug fixes must look for the same defect elsewhere
     },
     'failure_triage': {
         # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),
