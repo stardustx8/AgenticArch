@@ -207,7 +207,10 @@ class Workers:
                 data = json.load(r)
         except (OSError, ValueError) as exc:
             return Result(False, '', error=f'local model error: {exc}')
-        text = (data.get('choices') or [{}])[0].get('message', {}).get('content') or ''
+        choice = (data.get('choices') or [{}])[0]
+        text = (choice.get('message', {}).get('content') or '').strip()
+        if choice.get('finish_reason') == 'length':
+            return Result(False, text, error='local model hit the token limit (degenerate output)')
         log.write_text(f'local {self.local["model"]}\n--- prompt\n{prompt[-4000:]}\n--- answer\n{text}')
         structured = _json_or_none(text) if schema is not None else None
         ok = bool(text.strip()) and (schema is None or structured is not None)

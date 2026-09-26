@@ -1004,6 +1004,17 @@ class WorkerTests(unittest.TestCase):
             with self.assertRaises(BillingError):
                 w.execute(LANES['luna_high'], 'p', Path(tmp))
 
+    def test_local_model_truncated_output_is_a_failure(self):
+        import io
+        body = json.dumps({'choices': [{'finish_reason': 'length', 'message': {'content': '{"files": [' + ' ' * 50}}]})
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch('urllib.request.urlopen', return_value=io.BytesIO(body.encode())):
+            w = Workers(self.cfg(tmp))
+            w.verify_billing = lambda cli: None
+            r = w.execute(LANES['gemma_local'], 'p', Path(tmp), write=False, schema={'type': 'object'})
+        self.assertFalse(r.ok)
+        self.assertIn('token limit', r.error)
+
     def test_codex_command_is_subscription_exec_with_effort(self):
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
         with tempfile.TemporaryDirectory() as tmp:
