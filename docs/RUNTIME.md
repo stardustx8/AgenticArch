@@ -40,6 +40,8 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
        retry same lane with the failure (2x), then escalate lane, then deep case
      worker blocked -> owner question (free rerun); after 3 answered questions per task
        (retry.max_owner_questions) a further block counts as a failed pass
+     backstop: every model call is logged (event model_call); a task at retry.max_model_calls (40;
+       normal lab tasks use <= 13) is BLOCKED + ntfy; `retry` gives it a fresh budget
   -> pass: mutation gate (planted bugs in changed code must be caught by the oracle tests)
   -> spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
      against the diff, read-only in the worktree

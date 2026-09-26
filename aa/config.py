@@ -69,6 +69,7 @@ DEFAULTS: dict[str, Any] = {
         'max_passes_per_lane': 2,
         'max_total_passes': 5,
         'max_owner_questions': 3,       # answered questions per task; then workers must decide alone
+        'max_model_calls': 40,          # backstop against any runaway loop: then BLOCKED + ntfy
     },
     'deep': {
         'challenge_rounds': 5,

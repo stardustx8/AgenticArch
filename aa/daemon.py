@@ -7,6 +7,7 @@ stored status.
 """
 from __future__ import annotations
 
+import re
 import signal
 import threading
 import time
@@ -29,6 +30,9 @@ def make_decider(cfg: Config, db: DB):
     return SemIf(cfg, db)
 
 
+TASK_LOG = re.compile(r'^(t\d{4}-[0-9a-f]{5})(?:-|$)')
+
+
 class App:
     def __init__(self, cfg: Config, db: DB | None = None, workers: Workers | None = None,
                  decider=None, notifier: Notifier | None = None):
@@ -38,8 +42,33 @@ class App:
         self.n = notifier or Notifier(cfg, self.db)
         self.decider = decider or make_decider(cfg, self.db)
         self.workers = workers or Workers(cfg)
+        self._count_model_calls()
         self.tasks = tasks.TaskFlow(cfg, self.db, self.workers, self.decider, self.n)
         self.cases = cases.CaseFlow(cfg, self.db, self.workers, self.decider, self.n)
+
+    def _count_model_calls(self) -> None:
+        """Log every model call of a task (log names start with the task id) for the call cap."""
+        orig = self.workers.execute
+
+        def execute(lane, prompt, cwd, **kw):
+            m = TASK_LOG.match(kw.get('log_name', ''))
+            if m:
+                self.db.event('model_call', m.group(1), lane=lane.name, job=kw['log_name'][len(m.group(1)) + 1:])
+            return orig(lane, prompt, cwd, **kw)
+        self.workers.execute = execute
+
+    def _over_call_cap(self, tid: str) -> bool:
+        cap = int(self.cfg['retry'].get('max_model_calls', 40))
+        n = self.db.q("SELECT COUNT(*) AS n FROM events WHERE task_id=? AND kind='model_call' AND id > "
+                      "COALESCE((SELECT MAX(id) FROM events WHERE task_id=? AND kind='call_budget_reset'), 0)",
+                      (tid, tid))[0]['n']
+        if n < cap:
+            return False
+        self.db.update_task(tid, status='BLOCKED', result=f'stopped after {n} model calls (retry.max_model_calls)')
+        self.db.event('model_call_cap', tid, calls=n)
+        self.n.send(f'Blocked {tid}', f'Stopped after {n} model calls - probably a loop. Check the events, '
+                    f'then aa answer "retry {tid}" or "cancel {tid}".', tags='warning')
+        return True
 
     # -------------------------------------------------------------- replies
     def handle_reply(self, line: str) -> None:
@@ -98,6 +127,7 @@ class App:
             self.tasks.spec_more(ident)       # one more spec loop
             return
         if t and t['status'] in ('BLOCKED', 'FAILED'):
+            self.db.event('call_budget_reset', ident)             # a retry gets a fresh call budget
             self.db.update_task(ident, status='TRIAGED' if t['tier'] else 'NEW', passes=0, lane_passes=0)
             return
         raise ValueError('only BLOCKED or FAILED tasks can be retried')
@@ -143,7 +173,7 @@ class App:
         scheduled = 0
         poll_s = float(self.cfg['deep']['poll_s'])
         for t in self.db.tasks(tasks.ACTIVE):
-            if not t['busy']:
+            if not t['busy'] and not self._over_call_cap(t['id']):
                 scheduled += self._submit(pool, 'task', t['id'], self.tasks.step, t)
         for c in self.db.cases(cases.ACTIVE):
             if c['busy']:

@@ -611,6 +611,21 @@ class LocalFlowTests(unittest.TestCase):
         self.assertIn('owner_questions_exhausted', [r['kind'] for r in self.env.db.q(
             'SELECT kind FROM events WHERE task_id=?', (tid,))])
 
+    def test_model_call_cap_blocks_a_runaway_task_and_retry_resets_it(self):
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': noop}, FakeCLM('routine'))
+        self.env.cfg['retry']['max_model_calls'] = 3
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'BLOCKED')
+        self.assertIn('3 model calls', t['result'])
+        self.assertEqual(len(self.env.workers.calls), 3)            # triage, worker, spec judge
+        self.assertIn('probably a loop', self.env.sent[-1][1])
+        self.env.db.inbox_put(f'retry {tid}')
+        self.env.run()
+        self.assertGreater(len(self.env.workers.calls), 3, 'a retry gets a fresh budget')
+        self.assertNotEqual(self.env.db.task(tid)['status'], 'BLOCKED')
+
     def test_triage_stops_asking_after_the_question_cap(self):
         asking = dict(triage('routine'), owner_question='Which exchange rate?')
         self.env = Env(self.tmp, {'triage': asking, 'work': write_done}, FakeCLM('routine'))
