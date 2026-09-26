@@ -28,6 +28,8 @@ a day); manual one-line Pro prompts are acceptable.
 | O15 | Skills installed on the workstation and the Mac. | skills/, tools/install_skills.py |
 | O17 | After the checks pass, Opus 5.5 checks the implementation against every acceptance criterion; mismatches go back to the worker, max 3 loops, then the owner. | aa/tasks.py `_spec_check` |
 | O16 | Git: branch + PR per milestone; SSH auth. Moderate cleanup: compat layers removed, Pi parked, docs trimmed. | this revision |
+| O18 | Speed/quota vs correctness (2026-09-26): accepting one more wrong result in 50 (2 percentage points of correct delivery) is fine if everything runs twice as fast. | HO-01 scoring |
+| O19 | Representative work (2026-09-26): application programming; medium projects such as web apps (not ERP scale); requirements engineering with AI; Power Query, BI, Excel and SQL work. | lab task sets |
 
 ## Environment (verified 2026-09-25)
 
