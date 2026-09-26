@@ -35,8 +35,8 @@ jobs:
           expected = {'.github/workflows/ho01-measurement-checkpoint.yml'} | {f'.ho01-transfer/measurement.part{i}' for i in range(4)}
           if set(paths) != expected:
               raise SystemExit('branch changed outside transfer: refusing to apply')
-          # Normalize identified text-transfer duplication only. Independent per-part
-          # and whole decoded-patch checksums are mandatory before git apply.
+          # Normalize identified text-transfer duplication only, then verify every
+          # part and the decoded patch independently before git apply.
           repairs = {
               0: [('ENbRRhdm','ENbRhdm'), ('JVuOO97','JVuO97'),
                   ('jNRiuoxJJDM','jNRiuoxJDM'), ('YQcnsGUU+','YQcnsGU+'),
@@ -49,19 +49,15 @@ jobs:
                     '8463b52dd6c6339561db6b33ced813d7fb11b5b4e33dc9e29f614ae73386920c',
                     '879ae76c96c45c58c464dab0ab4742c368bfbd57f46e3a82afa7d6fedd67edf2']
           parts = []
-          invalid = []
           for i, expected_hash in enumerate(hashes):
               value = pathlib.Path(f'.ho01-transfer/measurement.part{i}').read_text().strip()
               for old, new in repairs.get(i, []):
                   value = value.replace(old, new)
               digest = hashlib.sha256(value.encode()).hexdigest()
               print(f'part {i}: {len(value)} characters, {digest}')
-              pathlib.Path(f'/tmp/ho01-measurement/transfer/normalized.part{i}').write_text(value)
               if digest != expected_hash:
-                  invalid.append(i)
+                  raise SystemExit(f'transfer checksum mismatch: {i}; no patch applied')
               parts.append(value)
-          if invalid:
-              raise SystemExit(f'transfer checksum mismatch: {invalid}; no patch applied')
           patch = gzip.decompress(base64.b64decode(''.join(parts), validate=True))
           if hashlib.sha256(patch).hexdigest() != '4bbdabd63c7dc53bed51406ceca6fb27825179f0f5938485ccad4e8a06cc565c':
               raise SystemExit('decoded patch checksum mismatch; no patch applied')
@@ -82,9 +78,13 @@ jobs:
           node --version | tee /tmp/ho01-measurement/node-version.txt
           python3 -m unittest discover -s tests -v 2>&1 | tee /tmp/ho01-measurement/unittest.txt
           python3 tools/check_kit.py 2>&1 | tee /tmp/ho01-measurement/check-kit.txt
-      - name: Commit only after all validation passed
+      - name: Commit tested code without changing persistent workflow configuration
         shell: bash
         run: |
+          # The connected GitHub action will publish this already-tested YAML
+          # separately using its own existing workflow permission.
+          cp .github/workflows/ho01-validation.yml /tmp/ho01-measurement/proposed-validation.yml
+          git restore --source=HEAD --staged --worktree .github/workflows/ho01-validation.yml
           git rm .github/workflows/ho01-measurement-checkpoint.yml .ho01-transfer/measurement.part*
           git config user.name 'AgenticArch HO-01'
           git config user.email 'stardustx8@users.noreply.github.com'
