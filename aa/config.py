@@ -107,6 +107,11 @@ DEFAULTS: dict[str, Any] = {
         'judge_lanes': ['opus_medium', 'astra_high'],   # both vendors judge; split -> tie-break
         'tiebreak_lane': 'gemma_local',                  # neutral third family, judged in both orders
     },
+    'harness_opt': {
+        # Experimental; do not enable by default before paired workstation runs.
+        'balanced_diffs': False, 'focused_failures': False, 'gate_shadow': False,
+        'claude_stop_checks': False, 'stop_max_blocks': 2, 'stop_timeout_s': 60,
+    },
     'ideas': {
         # Experimental ideas under A/B test in the harness lab (tools/lab.py); all off = baseline.
         'diff_audit': False,        # deterministic audit: test edits, new deps, debug prints, debris

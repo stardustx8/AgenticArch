@@ -123,3 +123,61 @@ Units start with the login session. For start at boot without login run once:
 - Decide the triage policy (Codex alone vs Codex + SemIf; eval/RESULTS.md).
 - Re-run the benchmark on the owner's real tasks once enough are logged.
 - Mac: skills call `aa` via Tailscale SSH; the target repo must exist on the workstation.
+
+
+## HO-01 experimental verification and context (defaults unchanged)
+
+The `harness_opt` section is opt-in. Roll back by removing its overrides; the
+existing coordinator verification, frozen test floors, owner gates, subscription
+billing preflight and lane choices are unchanged.
+
+```toml
+[harness_opt]
+balanced_diffs = false
+focused_failures = false
+gate_shadow = false
+claude_stop_checks = false
+stop_max_blocks = 2
+stop_timeout_s = 60
+```
+
+`balanced_diffs` distributes the existing 30,000-character pairwise and
+60,000-character spec-review budgets across changed files instead of taking only
+the first files. Excerpts explicitly mark omissions and are not executable
+patches. Small diffs are byte-for-byte unchanged. It does not increase a judge's
+budget or let the judge approve a check failure.
+
+`focused_failures` keeps bounded diagnostic windows and both ends of failed
+check output. The original exit code still controls failure. This affects the
+coordinator's retained check output and retry report; it cannot prune tools inside
+a provider-owned worker session. Excerpts are untrusted diagnostic data, not new
+instructions.
+
+`gate_shadow` stores a schema-versioned, pre-quality-dispatch feature snapshot in
+task data. Its explicit allowlist excludes results, hidden tests and delivered
+diffs. It **abstains** and never switches a gate. `aa.gate_snapshot.replay_choice`
+replays menu validation, including pinned/running selections and separately
+labelled fallbacks; it deliberately returns no counterfactual coding outcome.
+
+`claude_stop_checks` installs a deterministic command Stop hook only on Claude
+implementation sessions with configured checks. Each dispatch gets a frozen,
+checksummed policy and a bounded counter outside the worktree. It merges with
+existing permission/sandbox settings. The hook can request at most two additional
+repair turns by default, subject to a 60-second check-batch deadline. It ignores
+foreign working directories and non-Stop events. Timeout or malformed input ends
+the hook loop; **the coordinator still runs its independent verification and
+retains all existing failure handling**. It never commits, publishes or approves
+completion. Hook events remain under the task state directory's `stop-hooks/`.
+
+This Linux/POSIX hook is a latency experiment, not an OS security boundary.
+Commands run repository code under the same user; a hostile process with that
+user's privileges is outside its threat model. Live CLI hook loading, existing
+user hooks, nested subprocess cleanup, wrong oracle tests, and subscription usage
+must be checked on the owner's workstation before promotion. Do not infer context
+compaction or actual subscription quota from cumulative token counts.
+
+The retrieval benchmark now uses one seeded random stream per task. Earlier
+`random` rows were constant-score ties, not random retrieval, and must not be used
+as a baseline. Commit-message retrieval measures localization, not end-to-end task
+success; its shuffled single-repository split is not an independent deployment
+holdout.

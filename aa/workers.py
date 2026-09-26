@@ -92,6 +92,8 @@ class Workers:
         self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
         self.logs = cfg.logs
+        self.harness_opt = dict(cfg['harness_opt'])
+        self.stop_root = cfg.state_dir / 'stop-hooks'
         self.run = runner
         self._auth_ok: dict[str, float] = {}
 
@@ -128,7 +130,7 @@ class Workers:
     # -- execution -------------------------------------------------------------
     def execute(self, lane: Lane, prompt: str, cwd: Path, *, write: bool = True,
                 extra_dirs: tuple[Path, ...] = (), schema: dict | None = None,
-                log_name: str = 'job') -> Result:
+                log_name: str = 'job', stop_checks: dict[str, str] | None = None) -> Result:
         self.verify_billing(lane.cli)
         self.logs.mkdir(parents=True, exist_ok=True)
         log = self.logs / f'{time.strftime("%Y%m%d-%H%M%S")}-{log_name}-{lane.name}.log'
@@ -138,7 +140,7 @@ class Workers:
         elif lane.cli == 'local':
             res = self._local(lane, prompt, schema, log)
         else:
-            res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log)
+            res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log, stop_checks)
         res.seconds = time.time() - t0
         return res
 
@@ -222,15 +224,18 @@ class Workers:
         return Result(ok, text, structured, [self.local['model']] if ok else [], data.get('usage') or {},
                       error='' if ok else 'local model returned no valid output')
 
-    def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
+    def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log, stop_checks=None) -> Result:
         # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.
         cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
                '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config']
+        settings = {}
         if write and self.claude_guard == 'sandbox':
-            cmd += ['--permission-mode', 'auto', '--settings', json.dumps(sandbox_settings(cwd, extra_dirs)),
+            settings = sandbox_settings(cwd, extra_dirs)
+            cmd += ['--permission-mode', 'auto',
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
         elif write and self.claude_guard == 'auto':
-            cmd += ['--permission-mode', 'auto', '--settings', json.dumps({'permissions': {'deny': WORKER_DENY}}),
+            settings = {'permissions': {'deny': list(WORKER_DENY)}}
+            cmd += ['--permission-mode', 'auto',
                     '--allowedTools', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
         elif write:
             cmd += ['--permission-mode', 'acceptEdits',
@@ -238,6 +243,14 @@ class Workers:
         else:
             cmd += ['--permission-mode', 'default', '--allowedTools', 'Read', 'Glob', 'Grep',
                     '--disallowedTools', 'Edit', 'Write', 'Bash']
+        if write and stop_checks and self.harness_opt.get('claude_stop_checks', False):
+            from .stop_hook import install
+            settings = install(settings, stop_checks, cwd, self.stop_root,
+                               max_blocks=int(self.harness_opt['stop_max_blocks']),
+                               timeout_s=float(self.harness_opt['stop_timeout_s']),
+                               reason_template=(Path(__file__).parent / 'prompts' / 'stop_checks.md').read_text())
+        if settings:
+            cmd += ['--settings', json.dumps(settings)]
         for d in extra_dirs:
             cmd += ['--add-dir', str(d)]
         if schema is not None:
@@ -271,6 +284,8 @@ class Workers:
         elif schema is not None and structured is None:
             err = 'missing structured output'
         usage = {'api_equivalent_usd': data.get('total_cost_usd'), **(data.get('usage') or {})}
+        if self.harness_opt.get('gate_shadow', False):
+            usage.update(num_turns=data.get('num_turns'), model_usage=data.get('modelUsage'))
         return Result(not err, text, structured, seen, usage, error=err)
 
 

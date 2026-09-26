@@ -69,7 +69,8 @@ class FakeWorkers(Workers):
             from aa.workers import BillingError
             raise BillingError('no subscription')
 
-    def execute(self, lane, prompt, cwd, *, write=True, extra_dirs=(), schema=None, log_name='job'):
+    def execute(self, lane, prompt, cwd, *, write=True, extra_dirs=(), schema=None, log_name='job',
+                stop_checks=None):
         self.verify_billing(lane.cli)
         self.calls.append((lane.name, log_name))
         if log_name.endswith('-triage'):
@@ -1590,3 +1591,258 @@ class IdeaFlagTests(unittest.TestCase):
         self.assertEqual(len(t['data']['attack']), 1)
         self.assertIn('adversarial test written by an independent model FAILS', p['spec'][0])
         self.assertFalse((self.env.cfg.worktrees / t['id'] / 'tests' / 'test_attack_x.py').exists())
+
+
+class HarnessOptContextTests(unittest.TestCase):
+    def test_experiments_are_off_by_default(self):
+        cfg = config.load(Path('/nonexistent'))
+        for flag in ('balanced_diffs', 'focused_failures', 'claude_stop_checks', 'gate_shadow'):
+            self.assertIs(cfg['harness_opt'][flag], False)
+
+    def test_small_context_is_unchanged(self):
+        from aa.context import balanced_diff, focused_failure
+        text = 'diff --git a/a.py b/a.py\n@@ -1 +1 @@\n-a\n+b\n'
+        self.assertEqual(balanced_diff(text, len(text)), text)
+        self.assertEqual(focused_failure(text, 500), text)
+
+    def test_diff_keeps_late_files_under_a_hard_budget(self):
+        from aa.context import balanced_diff
+        text = ('diff --git a/aaa.py b/aaa.py\n@@ -1 +1 @@\n' + '+long data\n' * 12000 +
+                'diff --git a/zzz.py b/zzz.py\n@@ -1 +1 @@\n-danger\n+fixed\n')
+        self.assertNotIn('b/zzz.py', text[:30000])
+        result = balanced_diff(text, 30000)
+        self.assertLessEqual(len(result), 30000)
+        for value in ('b/aaa.py', 'b/zzz.py', '+fixed', 'omitted'):
+            self.assertIn(value, result)
+
+    def test_context_handles_tiny_budgets_and_many_files(self):
+        from aa.context import balanced_diff, focused_failure
+        text = ''.join(f'diff --git a/{i} b/{i}\n+{"x" * i}\n' for i in range(100))
+        for limit in (0, 1, 25, 100, 513, 4000):
+            self.assertLessEqual(len(balanced_diff(text, limit)), limit)
+            self.assertLessEqual(len(focused_failure(text, limit)), limit)
+        with self.assertRaises(ValueError):
+            balanced_diff(text, -1)
+
+    def test_focus_keeps_middle_diagnostic_and_tail(self):
+        from aa.context import focused_failure
+        text = ('setup\n' * 4000 + 'AssertionError: central contract violated\n' +
+                'noise\n' * 4000 + 'FAILED final summary\n')
+        result = focused_failure(text, 3000)
+        self.assertIn('central contract violated', result)
+        self.assertIn('final summary', result)
+        self.assertLessEqual(len(result), 3000)
+
+    def test_focused_check_cannot_change_an_exit_status(self):
+        from aa import checks
+        with tempfile.TemporaryDirectory() as tmp:
+            command = "printf 'AssertionError: early root cause\\n'; python3 -c 'print(\"n\"*9000)'; exit 7"
+            ordinary = checks.run({'test': command}, Path(tmp))[0]
+            focused = checks.run({'test': command}, Path(tmp), focused=True)[0]
+            self.assertEqual((ordinary.exit_code, focused.exit_code), (7, 7))
+            self.assertNotIn('early root cause', ordinary.output)
+            self.assertIn('early root cause', checks.failure_report([focused], focused=True))
+            self.assertFalse(focused.ok)
+
+    def test_spec_judge_receives_late_diff_with_flag(self):
+        captured = []
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'aaa.txt').write_text('long-data\n' * 13000)
+            (cwd / 'zzz.txt').write_text('late-contract\n')
+            return write_done(lane, cwd, prompt, extra)
+        def judge(lane, cwd, prompt, extra):
+            captured.append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Env(Path(tmp), {'triage': triage('bounded'), 'work': work, 'spec': judge}, FakeCLM('bounded'))
+            self.addCleanup(env.close)
+            env.cfg.data['harness_opt']['balanced_diffs'] = True
+            tid = env.app.tasks.create(env.target, 'implement a')
+            env.run()
+            self.assertEqual(env.db.task(tid)['status'], 'DONE')
+            self.assertIn('b/zzz.txt', captured[0])
+            self.assertIn('late-contract', captured[0])
+            self.assertTrue(any(name.endswith('-spec') for _, name in env.workers.calls))
+
+    def test_pairwise_judges_receive_both_late_diffs(self):
+        captured = []
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'aaa.txt').write_text('lots-of-data\n' * 6000)
+            (cwd / 'zzz.txt').write_text('late-contract\n')
+            return write_done(lane, cwd, prompt, extra)
+        def pick(lane, cwd, prompt, extra):
+            captured.append(prompt)
+            return Result(True, '', {'winner': 'A', 'reason': 'equivalent'}, [lane.model])
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Env(Path(tmp), {'triage': triage('medium_tough'), 'work': work, 'pick': pick},
+                      FakeCLM('medium_tough', 'astra'), best_of_2=True)
+            self.addCleanup(env.close)
+            env.cfg.data['harness_opt']['balanced_diffs'] = True
+            tid = env.app.tasks.create(env.target, 'implement a')
+            env.run()
+            self.assertEqual(env.db.task(tid)['status'], 'DONE')
+            self.assertTrue(captured)
+            self.assertTrue(all(p.count('b/zzz.txt') >= 2 for p in captured))
+
+    def test_random_retrieval_baseline_is_not_alphabetical(self):
+        from tools.bench_context import random_scores
+        candidates = ['a.py', 'b.py', 'c.py', 'd.py']
+        scores = random_scores(candidates, 7)
+        self.assertEqual(scores, random_scores(candidates, 7))
+        self.assertEqual(len(set(scores.values())), 4)
+        self.assertNotEqual(sorted(scores, key=scores.get), candidates)
+
+
+class HarnessOptGateRecordTests(unittest.TestCase):
+    def test_snapshot_has_no_post_outcome_features(self):
+        from aa.gate_snapshot import snapshot
+        tri = triage('bounded') | {'hidden_pass': True, 'passes': 9, 'oracle_score': 1}
+        rec = snapshot('do work', 'bounded', tri, {'test': 'true'}, True, False, True)
+        self.assertNotIn('hidden_pass', json.dumps(rec))
+        self.assertNotIn('oracle_score', json.dumps(rec))
+        self.assertEqual(rec['recommendation'], 'abstain_unfitted')
+        self.assertFalse(rec['applied'])
+
+    def test_gate_shadow_neither_removes_nor_adds_model_calls(self):
+        calls = []
+        for enabled in (False, True):
+            with tempfile.TemporaryDirectory() as tmp:
+                env = Env(Path(tmp), {'triage': triage('bounded'), 'work': write_done}, FakeCLM('bounded'))
+                try:
+                    env.cfg.data['harness_opt']['gate_shadow'] = enabled
+                    tid = env.app.tasks.create(env.target, 'implement a')
+                    env.run()
+                    task = env.db.task(tid)
+                    self.assertEqual(task['status'], 'DONE')
+                    self.assertEqual('gate_snapshot' in task['data'], enabled)
+                    calls.append([lane for lane, _ in env.workers.calls])
+                finally:
+                    env.close()
+        self.assertEqual(*calls)
+
+    def test_replay_revalidates_and_never_invents_success(self):
+        from aa.gate_snapshot import replay_choice
+        self.assertEqual(replay_choice({}, 'missing', {'safe'}, 'safe')['source'], 'fallback')
+        self.assertEqual(replay_choice({}, None, set(), 'safe')['source'], 'blocked_no_fallback')
+        self.assertEqual(replay_choice({'running': 'current'}, 'new', {'new'}, 'new')['choice'], 'current')
+        self.assertEqual(replay_choice({'pinned': 'owner'}, 'new', {'new'}, 'new')['choice'], 'owner')
+        self.assertIsNone(replay_choice({}, 'safe', {'safe'}, 'safe')['outcome'])
+
+
+class HarnessOptStopTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.wt = self.root / 'wt'
+        self.wt.mkdir()
+
+    def install(self, checks=None, **kw):
+        from aa.stop_hook import install
+        return install({'permissions': {'deny': ['Bash(git push:*)']},
+                        'sandbox': {'enabled': True}}, checks or {'test': 'test -f fixed'},
+                       self.wt, self.root / 'hooks', max_blocks=2, timeout_s=kw.get('timeout', 2),
+                       reason_template='Fix without weakening checks.\n$failures')
+
+    def invoke(self, settings, payload=None):
+        import shlex
+        command = settings['hooks']['Stop'][-1]['hooks'][0]['command']
+        args = shlex.split(command)
+        inp = {'hook_event_name': 'Stop', 'cwd': str(self.wt), 'stop_hook_active': True}
+        if payload is not None:
+            inp = payload
+        p = subprocess.run(args, input=json.dumps(inp), capture_output=True, text=True, timeout=6)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.loads(p.stdout), Path(args[args.index('--policy') + 1])
+
+    def test_bounded_blocks_then_coordinator_takes_over(self):
+        settings = self.install()
+        one, policy = self.invoke(settings)
+        two, _ = self.invoke(settings)
+        three, _ = self.invoke(settings)
+        self.assertEqual(one['decision'], 'block')
+        self.assertEqual(two['decision'], 'block')
+        self.assertEqual(three, {})
+        self.assertEqual((policy.parent / 'counter').read_text(), '2')
+        self.assertIn('cap_reached', (policy.parent / 'events.jsonl').read_text())
+
+    def test_success_after_repair_stops_without_approval(self):
+        settings = self.install()
+        self.assertEqual(self.invoke(settings)[0]['decision'], 'block')
+        (self.wt / 'fixed').touch()
+        response, policy = self.invoke(settings)
+        self.assertEqual(response, {})
+        self.assertFalse(any((self.wt / f).exists() for f in ('approved', '.git')))
+        self.assertIn('checks_passed', (policy.parent / 'events.jsonl').read_text())
+
+    def test_policy_not_reloaded_from_worker_configuration(self):
+        settings = self.install()
+        (self.wt / '.agenticarch.toml').write_text('[checks]\ntest="true"\n')
+        self.assertEqual(self.invoke(settings)[0]['decision'], 'block')
+
+    def test_foreign_cwd_and_failure_events_are_ignored(self):
+        settings = self.install({'test': 'touch must-not-run; false'})
+        for payload in ({'hook_event_name': 'StopFailure', 'cwd': str(self.wt)},
+                        {'hook_event_name': 'Stop', 'cwd': str(self.root)}, []):
+            self.assertEqual(self.invoke(settings, payload)[0], {})
+        self.assertFalse((self.wt / 'must-not-run').exists())
+
+    def test_hook_timeout_is_bounded_and_does_not_repeat(self):
+        settings = self.install({'test': 'sleep 2; touch should-not-exist'}, timeout=.05)
+        response, policy = self.invoke(settings)
+        self.assertEqual(response, {})
+        self.assertEqual((policy.parent / 'counter').read_text(), '2')
+        self.assertIn('timeout', (policy.parent / 'events.jsonl').read_text())
+        self.assertFalse((self.wt / 'should-not-exist').exists())
+
+    def test_tampered_policy_does_not_request_more_turns(self):
+        settings = self.install()
+        _, policy = self.invoke(settings)
+        policy.write_text('{}')
+        self.assertEqual(self.invoke(settings)[0], {})
+        self.assertIn('invalid_input', (policy.parent / 'events.jsonl').read_text())
+
+    def test_settings_merge_keeps_sandbox_and_hard_denies(self):
+        from aa.stop_hook import install
+        original = {'sandbox': {'enabled': True}, 'hooks': {'Stop': [{'hooks': []}]},
+                    'permissions': {'deny': ['Bash(git push:*)']}}
+        merged = install(original, {'x': 'false'}, self.wt, self.root / 'hooks', max_blocks=1,
+                         timeout_s=1, reason_template='$failures')
+        self.assertTrue(merged['sandbox']['enabled'])
+        self.assertIn('Bash(git push:*)', merged['permissions']['deny'])
+        self.assertEqual(len(merged['hooks']['Stop']), 2)
+        self.assertEqual(len(original['hooks']['Stop']), 1)
+        with self.assertRaises(ValueError):
+            install({}, {'x': 'false'}, self.wt, self.wt / 'hooks', max_blocks=1,
+                    timeout_s=1, reason_template='$failures')
+
+    def test_hook_does_not_replace_coordinator_verification(self):
+        base = self.root / 'env'
+        base.mkdir()
+        env = Env(base, {'triage': triage('bounded'), 'work': noop}, FakeCLM('bounded'), triage=False)
+        self.addCleanup(env.close)
+        env.cfg.data['harness_opt']['claude_stop_checks'] = True
+        tid = env.app.tasks.create(env.target, 'implement a')
+        env.run(n=12)
+        self.assertNotEqual(env.db.task(tid)['status'], 'DONE')
+
+    def test_cli_hook_is_only_attached_to_explicit_write_jobs(self):
+        commands = []
+        def runner(cmd, **kw):
+            commands.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({
+                'result': 'ok', 'modelUsage': {'claude-opus-5-5': {}}, 'usage': {}}), '')
+        cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': str(self.root / 'state')},
+                                                'harness_opt': {'claude_stop_checks': True}})
+        workers = Workers(cfg, runner)
+        workers.verify_billing = lambda cli: None
+        workers.execute(LANES['opus_high'], 'task', self.wt, stop_checks={'x': 'false'})
+        command = commands[-1]
+        settings = json.loads(command[command.index('--settings') + 1])
+        self.assertIn('Stop', settings['hooks'])
+        self.assertIn('Bash(git push:*)', settings['permissions']['deny'])
+        workers.execute(LANES['opus_high'], 'judge', self.wt, write=False, stop_checks={'x': 'false'})
+        self.assertNotIn('--settings', commands[-1])
+        workers.execute(LANES['opus_high'], 'oracle author', self.wt)
+        settings = json.loads(commands[-1][commands[-1].index('--settings') + 1])
+        self.assertNotIn('hooks', settings)

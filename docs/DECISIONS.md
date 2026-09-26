@@ -142,3 +142,21 @@ contents 0.63, SemIf on paths 0.50, SemIf on paths + first 40 lines 0.40, path k
 random 0.23; SemIf re-ranking a BM25 top 15 did not help (0.64). Dev and test halves agree.
 Now: triage relevant paths first, then BM25 (`aa/retrieval.py`), no model. Commit messages
 are cleaner than real requests, which flatters every method alike.
+
+
+## HO-01 / 2026-09-26: measure before changing gate defaults
+
+Keep production gate defaults unchanged. Add optional balanced diff excerpts,
+focused failure feedback, bounded deterministic Claude Stop checks, and ex-ante
+shadow records. Stop checks do not replace coordinator checks or dispute handling.
+The new records are feature plumbing, not a fitted router: no empirical difficulty
+boundary is assumed. Menu replay tests dispatch validation only, not the success
+of an action that was never taken.
+
+Correct the retrieval benchmark's constant-score “random” baseline. Do not turn
+post-outcome commit-message retrieval scores into a claim about coding correctness.
+No new paid service, model API, credential transfer, Python dependency, or automatic
+promotion/merge is introduced. Model-facing omission and repair text lives under
+`aa/prompts/`. Workstation experiments must establish provider compatibility and
+quality/cost tradeoffs; deterministic regression coverage alone cannot establish
+that a model produces better code.
