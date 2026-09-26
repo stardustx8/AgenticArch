@@ -54,3 +54,20 @@ more missed environment failure) -> not adopted. Calibration of the current word
 90 rows: confidence 0.9+ n=69 accuracy 0.83; 0.6-0.9 n=9 0.67; 0.3-0.6 n=6 0.50; <0.3 n=6 0.00.
 Confidence ranks correctly but SemIf is overconfident at the top, which supports using it
 only to flag (never to decide alone).
+
+## Context selection (2026-09-26)
+
+Which files does a change need, given its description? 100 commits of pallets/click (median
+87 candidate files, 1-4 edited files each), `tools/bench_context.py`, D022:
+
+| method | recall@5 | recall@10 | MRR |
+| --- | --- | --- | --- |
+| random | 0.06 | 0.23 | 0.08 |
+| path keywords | 0.16 | 0.28 | 0.18 |
+| **BM25 over contents** | **0.46** | **0.63** | **0.42** |
+| SemIf, path | 0.31 | 0.50 | 0.29 |
+| SemIf, path + first 40 lines | 0.20 | 0.40 | 0.20 |
+| BM25 top 15, SemIf re-ranks | 0.45 | 0.64 | 0.37 |
+
+SemIf is a classifier of short states; judging file relevance from content is outside what it
+does well. Plain retrieval wins; SemIf is not used for context selection.

@@ -132,3 +132,13 @@ self-preference of judges, local models only where output is verifiable): (1) ti
 the Opus/Astra pick panel splits, judged in both orders; (2) extra independent oracle test
 set (main author in races). Measured 98% on the blind spec-conformance probe. It never
 approves or vetoes on its own; its tests pass the same validation as any oracle.
+
+## D022: deep-case reading list by BM25 over contents, not SemIf, added 2026-09-26
+
+The BRIEF's reading list was triage paths plus files whose path contained a prompt word,
+trimmed to 12 by SemIf. Benchmark on 100 real commits of pallets/click (commit message with
+file names masked -> files the commit edited; `tools/bench_context.py`): recall@10 BM25 over
+contents 0.63, SemIf on paths 0.50, SemIf on paths + first 40 lines 0.40, path keywords 0.28,
+random 0.23; SemIf re-ranking a BM25 top 15 did not help (0.64). Dev and test halves agree.
+Now: triage relevant paths first, then BM25 (`aa/retrieval.py`), no model. Commit messages
+are cleaner than real requests, which flatters every method alike.

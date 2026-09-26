@@ -27,7 +27,7 @@ DEFAULTS: dict[str, Any] = {
         'enabled': True,
     },
     'decider': {
-        # Local semantic decider for tier/peer votes and context ranking. SemIf won the
+        # Local semantic decider for tier/peer votes (context selection uses BM25, D022). SemIf won the
         # 2026-09-25 benchmark (86% vs 39% tier accuracy on the test split).
         'backend': 'semif',
         # Below this confidence (top minus mean of the rest) a vote is an abstention.

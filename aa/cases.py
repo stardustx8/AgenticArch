@@ -22,6 +22,7 @@ from . import git
 from .config import Config
 from .db import DB
 from .notify import Notifier
+from .retrieval import bm25_rank
 from .tasks import bullet, render
 from .workers import LANES, Workers
 
@@ -98,15 +99,12 @@ class CaseFlow:
         self._request_pro(c, 'pro_draft.md', first=True)
 
     def _context_paths(self, t: dict, target: Path, tri: dict) -> list[str]:
-        """CLM context selection: rank candidate files for the BRIEF's reading list."""
+        """BRIEF reading list: triage's relevant paths first, then BM25 over file contents
+        (measured better than SemIf ranking and path keywords, see aa/retrieval.py)."""
         tracked = git.git(target, 'ls-files', check=False).splitlines()
-        words = {w.lower() for w in re.findall(r'[A-Za-z_]{4,}', t['prompt'])}
-        cands = list(dict.fromkeys(
-            [p for p in tri.get('relevant_paths') or [] if p in tracked] +
-            [p for p in tracked if any(w in p.lower() for w in words)]))[:60]
-        if len(cands) <= 12:
-            return cands
-        return self.decider.rank(t['id'], t['prompt'], 'Which file is most relevant to this task?', cands, 12)
+        pinned = [p for p in tri.get('relevant_paths') or [] if p in tracked][:12]
+        rest = [p for p in bm25_rank(t['prompt'], target, tracked[:5000], 12) if p not in pinned]
+        return (pinned + rest)[:12]
 
     def _request_pro(self, c: dict, template: str, *, first: bool = False, **extra: object) -> None:
         nn = c['pro_turn'] + 1

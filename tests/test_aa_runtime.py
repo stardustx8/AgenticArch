@@ -1404,6 +1404,27 @@ class OracleValidationTests(unittest.TestCase):
         self.assertNotIn('oracle_dropped', [k for k, _ in self.events(tid)])
 
 
+class ContextSelectionTests(unittest.TestCase):
+    """Deep-case reading list: triage paths first, then BM25 over contents (not path words)."""
+
+    def test_reading_list_finds_files_by_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            files = {'app.py': 'print(1)\n', 'billing/fx.py': 'def convert(amount, exchange_rate):\n'
+                     '    """Currency conversion with the daily exchange rate; rounding half up."""\n',
+                     'img.bin': '\0' * 10 + 'exchange rate', 'docs/notes.md': 'meeting notes\n'}
+            files.update({f'pkg/mod{i}.py': f'def f{i}(): return {i}\n' for i in range(30)})
+            env = Env(tmp, {'triage': triage('tough'), 'work': noop}, FakeCLM('tough'))
+            init_repo(tmp / 'big', files)
+            t = {'id': 't0926-00000', 'prompt': 'Fix the rounding of the exchange rate conversion'}
+            paths = env.app.cases._context_paths(t, tmp / 'big', {'relevant_paths': ['app.py', 'nope.py']})
+            env.close()
+        self.assertEqual(paths[0], 'app.py', 'triage paths stay pinned first')
+        self.assertEqual(paths[1], 'billing/fx.py')
+        self.assertNotIn('img.bin', paths)
+        self.assertLessEqual(len(paths), 12)
+
+
 class LocalModelTests(unittest.TestCase):
     """Gemma (local lane) as extra independent test writer and as neutral tie-breaker."""
 
