@@ -449,7 +449,8 @@ class QualityMixin:
     def _select(self, t: dict, cands: dict, lanes: list[str], results: dict) -> None:
         repo = Path(t['repo'])
         tri = t['data'].get('triage') or {}
-        if all(r['status'] == 'blocked' and not r.get('disputed') for r in results.values()):
+        if (all(r['status'] == 'blocked' and not r.get('disputed') for r in results.values())
+                and not self._questions_exhausted(t)):
             self._cleanup_race(t, keep=None)
             self._ask_owner(t, next(iter(results.values()))['question'] or 'The workers need your input.')
             return

@@ -68,6 +68,7 @@ DEFAULTS: dict[str, Any] = {
     'retry': {
         'max_passes_per_lane': 2,
         'max_total_passes': 5,
+        'max_owner_questions': 3,       # answered questions per task; then workers must decide alone
     },
     'deep': {
         'challenge_rounds': 5,

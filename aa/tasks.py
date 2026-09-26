@@ -154,7 +154,7 @@ class TaskFlow(QualityMixin):
         else:
             triage = res.structured
         data['triage'] = triage
-        if (triage.get('owner_question') or '').strip():
+        if (triage.get('owner_question') or '').strip() and not self._questions_exhausted(t):
             # Missing owner facts are asked before anyone is dispatched (not routed to Pro).
             data['question_stage'] = 'triage'
             self.db.update_task(t['id'], data=data)
@@ -353,6 +353,15 @@ class TaskFlow(QualityMixin):
             self.db.event('oracle_disputed', t['id'], status=report['status'], files=disputed[:10])
         self.db.update_task(t['id'], passes=passes, lane_passes=lane_passes, data=t['data'])
         if report['status'] == 'blocked' and not disputed:
+            if self._questions_exhausted(t):
+                # Owner answers are free reruns, so an ever-blocking worker would loop on the owner.
+                t = self.db.task(t['id'])
+                t['data']['last_failure'] = ('You reported blocked again although the owner already answered '
+                                             'your questions (see above). Do not ask again: decide from those '
+                                             'answers, state your assumptions in the summary and finish.')
+                self.db.event('owner_questions_exhausted', t['id'], question=report['question'][:300])
+                self._retry_or_escalate(t)
+                return
             self._ask_owner(t, report['question'] or report['summary'])
             return
         if not res.ok and not report['from_schema']:
@@ -385,6 +394,9 @@ class TaskFlow(QualityMixin):
                     f'to topic {self.n.reply_topic} in ntfy, or on the workstation: '
                     f'aa answer "answer {t["id"]} <your answer>"',
                     choices=[('Cancel', f'cancel {t["id"]}')], priority=4, tags='question')
+
+    def _questions_exhausted(self, t: dict) -> bool:
+        return len(t['data'].get('owner_answers') or []) >= int(self.cfg['retry'].get('max_owner_questions', 3))
 
     @staticmethod
     def _answers_text(t: dict) -> str:

@@ -587,6 +587,37 @@ class LocalFlowTests(unittest.TestCase):
         self.assertEqual((t['status'], t['passes']), ('DONE', 1), 'owner answers do not consume retries')
         self.assertIn('A: CSV please', prompts[1])
 
+    def _answer_every_question(self, tid, rounds=30):
+        answers = 0
+        for _ in range(rounds):
+            self.env.run()
+            t = self.env.db.task(tid)
+            if t['status'] != 'WAIT_OWNER':
+                break
+            answers += 1
+            self.env.db.inbox_put(f'answer {tid} no more information, decide yourself')
+        return self.env.db.task(tid), answers
+
+    def test_ever_blocking_worker_does_not_loop_on_the_owner(self):
+        # Lab run b3_allocate_remainder: 48 owner pings, because answers are free reruns.
+        always = lambda lane, cwd, prompt, extra: Result(True, '{}', {
+            'status': 'blocked', 'summary': 'stopped', 'open_items': [], 'question': 'Which rounding?',
+            'rebuttals': []}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': always}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        t, answers = self._answer_every_question(tid)
+        self.assertEqual(answers, 3)
+        self.assertNotIn(t['status'], ('WAIT_OWNER', 'READY', 'VERIFY'))
+        self.assertIn('owner_questions_exhausted', [r['kind'] for r in self.env.db.q(
+            'SELECT kind FROM events WHERE task_id=?', (tid,))])
+
+    def test_triage_stops_asking_after_the_question_cap(self):
+        asking = dict(triage('routine'), owner_question='Which exchange rate?')
+        self.env = Env(self.tmp, {'triage': asking, 'work': write_done}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'convert usd')
+        t, answers = self._answer_every_question(tid)
+        self.assertEqual((t['status'], answers), ('DONE', 3))
+
     def test_triage_owner_question_asked_before_dispatch(self):
         triage_prompts = []
         first = dict(triage('tough', ['research']), owner_question='Which exchange rate should be used?')

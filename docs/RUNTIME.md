@@ -27,7 +27,9 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
      tough (or Pro category): deep case
   -> oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
      (+ an extra set by local Gemma; in races Gemma is the neutral main author),
-     validated (syntax, must fail on base; one repair round), read-only for workers
+     validated (syntax, must fail on base; one repair round), read-only for workers;
+     a worker that disputes a named test file while everything else passes (checked with the
+     oracle files hidden) gets that author's test set dropped - no owner ping, no escalation
   -> medium_tough (or a Luna task out of retries): Astra and Opus race in parallel worktrees;
      checks decide, two-vendor judge panel when both pass (split -> Gemma in both orders,
      inconsistent -> smaller diff)
@@ -36,6 +38,8 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
        passes on rerun: FLAKY (noted) | SemIf says environment: pause + ntfy Retry/Treat as code/Cancel
        same failure on the base commit: PRE_EXISTING (spec judge told) | else CODE:
        retry same lane with the failure (2x), then escalate lane, then deep case
+     worker blocked -> owner question (free rerun); after 3 answered questions per task
+       (retry.max_owner_questions) a further block counts as a failed pass
   -> pass: mutation gate (planted bugs in changed code must be caught by the oracle tests)
   -> spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
      against the diff, read-only in the worktree
