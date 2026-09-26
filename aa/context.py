@@ -73,11 +73,12 @@ def balanced_diff(text: str, limit: int) -> str:
 
 
 def focused_failure(text: str, limit: int) -> str:
-    """Retain diagnostic windows plus both ends, in original chronological order.
+    """Keep diagnostics and spend spare space on their surrounding lines.
 
-    Pure presentation: never converts a failed check into a passing one. Repeated
-    diagnostics are sampled evenly if there are too many to fit; omissions are
-    explicit. Lines may be clipped, so full check logs remain the source of truth.
+    Preserve the legacy suffix when every diagnostic is already in that suffix.
+    Otherwise grow context around *all* diagnostics, rather than sampling twelve
+    anchors or returning tiny windows while most of the budget remains unused.
+    This is a bounded excerpt, not a guarantee that an arbitrarily large log fits.
     """
     if limit < 0:
         raise ValueError('character limit must be nonnegative')
@@ -87,33 +88,44 @@ def focused_failure(text: str, limit: int) -> str:
     anchors = [i for i, line in enumerate(lines) if DIAGNOSTIC.search(line)]
     if not anchors:
         return head_tail(text, limit)
-    # Bound the number of windows independently of adversarial log length.
-    if len(anchors) > 12:
-        anchors = [anchors[round(i * (len(anchors) - 1) / 11)] for i in range(12)]
-    selected = set(range(min(3, len(lines)))) | set(range(max(0, len(lines) - 3), len(lines)))
-    for anchor in anchors:
-        selected.update(range(max(0, anchor - 1), min(len(lines), anchor + 3)))
-    groups = []
-    for i in sorted(selected):
-        if not groups or i != groups[-1][-1] + 1:
-            groups.append([])
-        groups[-1].append(i)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    if offsets[anchors[0]] >= len(text) - limit:
+        return text[-limit:] if limit else ''
     marker = '\n' + MARKER + '\n'
-    room = limit - len(marker) * (len(groups) - 1)
-    if room <= 0:
-        return head_tail(text, limit)
-    pieces = [''.join(lines[i] for i in group) for group in groups]
-    # Give every selected window a share; small windows free space for long ones.
-    allocations = [0] * len(pieces)
-    active = set(range(len(pieces)))
-    while room and active:
-        share = max(1, room // len(active))
-        for i in sorted(active):
-            add = min(share, len(pieces[i]) - allocations[i], room)
-            allocations[i] += add
-            room -= add
-            if allocations[i] >= len(pieces[i]):
-                active.remove(i)
-            if not room:
-                break
-    return marker.join(head_tail(p, n) for p, n in zip(pieces, allocations))
+    selected = set(anchors) | set(range(min(3, len(lines))))
+    selected.update(range(max(0, len(lines) - 3), len(lines)))
+
+    def render():
+        out = []
+        previous = -1
+        for i in sorted(selected):
+            if previous >= 0 and i != previous + 1:
+                out.append(marker)
+            out.append(lines[i])
+            previous = i
+        return ''.join(out)
+
+    used = len(render())
+    if used > limit:
+        # Even bare diagnostics cannot all fit. Mark that loss, never silently
+        # claim complete coverage or allocate a negative budget.
+        return head_tail(render(), limit)
+    import heapq
+    pending = [(0, i) for i in selected]
+    heapq.heapify(pending)
+    visited = set(selected)
+    while pending:
+        distance, i = heapq.heappop(pending)
+        for j in (i - 1, i + 1):
+            if not 0 <= j < len(lines) or j in visited:
+                continue
+            visited.add(j)
+            left, right = j - 1 in selected, j + 1 in selected
+            change = len(lines[j]) + (0 if left != right else (-len(marker) if left else len(marker)))
+            if used + change <= limit:
+                selected.add(j)
+                used += change
+                heapq.heappush(pending, (distance + 1, j))
+    return render()

@@ -60,7 +60,8 @@ def evaluate(policy: dict, payload: dict, blocks: int) -> tuple[dict, int, dict]
     """Return the hook reply, new count and audit entry; no DB or git writes."""
     audit = {'event': 'ignored', 'blocks': blocks, 'ts': time.time()}
     if (payload.get('hook_event_name') != 'Stop' or
-            Path(str(payload.get('cwd', ''))).resolve() != Path(policy['cwd']).resolve()):
+            not payload.get('cwd') or
+            not Path(str(payload['cwd'])).resolve().is_relative_to(Path(policy['cwd']).resolve())):
         return {}, blocks, audit
     if blocks >= policy['max_blocks']:
         audit['event'] = 'cap_reached'
@@ -111,14 +112,26 @@ def install(settings: dict, checks: dict, cwd: Path, root: Path, *, max_blocks: 
     (capsule / 'policy.json').write_bytes(data)
     (capsule / 'hook.py').write_bytes(Path(__file__).read_bytes())
     import shlex
-    command = shlex.join([sys.executable, '-I', str(capsule / 'hook.py'),
-                          '--policy', str(capsule / 'policy.json'),
-                          '--sha256', hashlib.sha256(data).hexdigest()])
+    # The trusted CLI argument verifies the copied executable before running it.
+    # A self-check inside hook.py would be editable along with the code it checks.
+    loader = ("import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); b=p.read_bytes(); "
+              "ok=hashlib.sha256(b).hexdigest()==sys.argv[2]; "
+              "sys.argv=[str(p)]+sys.argv[3:]; "
+              "exec(compile(b,str(p),'exec'),{'__name__':'__main__','__file__':str(p)}) "
+              "if ok else print('{}')")
+    command = shlex.join([sys.executable, '-I', '-c', loader, str(capsule / 'hook.py'),
+                          hashlib.sha256((capsule / 'hook.py').read_bytes()).hexdigest(),
+                          '--policy', str(capsule / 'policy.json'), '--sha256', hashlib.sha256(data).hexdigest()])
     result = json.loads(json.dumps(settings))
     result.setdefault('hooks', {}).setdefault('Stop', []).append(
         {'hooks': [{'type': 'command', 'command': command, 'timeout': timeout_s + 5}]})
     denies = result.setdefault('permissions', {}).setdefault('deny', [])
-    denies.extend([f'Write({capsule}/**)', f'Edit({capsule}/**)'])
+    # Claude file rules use // for absolute paths. A single slash is relative
+    # to a settings root. These tool rules are NOT a same-UID shell sandbox.
+    for path in (capsule, cwd.resolve() / '.claude'):
+        absolute = '/' + path.as_posix()
+        denies.append(f'Edit({absolute}/**)')  # also covers Write; Write(path) is ignored
+    result['disableAllHooks'] = False
     return result
 
 
