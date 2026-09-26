@@ -78,7 +78,7 @@ switches models only. Medium-tough peers are Astra high and Opus 5.5 high.
 
 ## D016: SemIf replaces CLM as local decider, supersedes D014
 
-Benchmark (eval/RESULTS.md): tier accuracy on a blind holdout — Codex triage 90%, SemIf
+Benchmark (eval/RESULTS.md): tier accuracy on a blind holdout: Codex triage 90%, SemIf
 82%, keyword rules 57%, CLM zero-shot 38%. SemIf (Qwen3.5-4B typed option logits, in a
 --network none container on a Unix socket) is the default decider; CLM services are
 stopped but selectable (`decider.backend`). Rules are kept as a zero-cost backend and
@@ -174,3 +174,39 @@ Historical decision replay audits the recorded menu and abstains about live
 availability or unobserved outcomes. No historical final selection is smuggled in
 as an optimal label or fallback. Keep all runtime gate defaults unchanged pending
 repeated, held-out quality and resource measurements.
+
+## HO-02 / 2026-09-26: project trajectories before policy promotion
+
+Evaluate changing existing systems, not only independent puzzles. Add six
+synthetic, mixed-language projects with two successive requirements each. The
+second requirement runs on the actual delivered state. References only validate
+the grader. A first VERIFY snapshot, final completion, protected originals,
+seven rubric dimensions and four critical-failure types are separate outcomes.
+Missing reviews and interrupted usage are unknown, never counted as successes.
+
+Keep all gate defaults unchanged. Task difficulty and the benefit of a gate are
+not interchangeable: one gate can improve a positive feature while another path
+loses an existing rejection contract. Diagnostic ablations must hold task and
+source fixed; a pinned initial tier is not a fixed solver because escalation can
+still occur. No IRT fit, selector training, automatic learning or quota conversion
+is justified merely by having repeated records.
+
+Repair the demonstrated focused-log evidence loss and the Stop capsule's file-rule
+syntax, subdirectory handling and copied-code integrity. Do not treat these repairs
+as proof of OS isolation or live provider compatibility. The Stop experiment stays
+off pending explicit compatibility, artifact and exposure checks. Same-user shell
+access remains outside its security guarantees. Correct check execution is still
+the coordinator's responsibility.
+
+The lab's persistence uses atomic, fsynced receipts plus append-only call/dispatch
+records, isolated trial identities, bounded grading and explicit resume. It does
+not erase an earlier killed attempt because a retry later succeeds. Linux process
+groups bound ordinary descendants, not deliberately escaping processes; a host
+memory limit is required for real trials. Evaluator-only data is not sent as worker
+context, but public reference access is not technically proven impossible.
+
+Evidence: all 291 tests and the kit validator pass on Python 3.11 CI at fce78a8.
+This validates mechanics and synthetic contracts, not real-worker superiority.
+Regression details, operating commands and limitations are in [HO02.md](HO02.md).
+Rollback: leave HO-01 flags false and do not invoke the new lab commands; production
+routing, subscription authentication and completion authority remain unchanged.
