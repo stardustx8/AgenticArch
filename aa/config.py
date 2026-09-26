@@ -75,6 +75,12 @@ DEFAULTS: dict[str, Any] = {
         'poll_s': 60,
         'challengers': ['opus_high', 'astra_high'],
     },
+    'failure_triage': {
+        # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),
+        # local decider flags environment problems (pause + ask owner) — eval/PROBES.md.
+        'enabled': True,
+        'min_confidence': 0.5,
+    },
     'spec_check': {
         # After the checks pass, an independent reviewer judges every acceptance criterion
         # against the diff (owner decision 2026-09-26: Opus 5.5, max 3 loops, then the owner).

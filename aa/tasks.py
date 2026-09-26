@@ -318,7 +318,12 @@ class TaskFlow:
         results = checks_mod.run(t['data'].get('checks') or {}, wt)
         git.discard(wt)                      # drop artefacts produced by the checks
         t['data']['checks_result'] = checks_mod.summary(results)
-        if all(r.ok for r in results):
+        failed = [r for r in results if not r.ok]
+        if failed and self.cfg['failure_triage'].get('enabled', True):
+            failed = self._triage_failures(t, wt, failed)
+            if failed is None:               # paused for the owner (environment problem)
+                return
+        if not failed:
             self.db.decision_outcome(t['id'], 'tier', 'pass')
             self.db.decision_outcome(t['id'], 'peer', 'pass')
             if self.cfg['spec_check'].get('enabled', True):
@@ -326,9 +331,74 @@ class TaskFlow:
             else:
                 self.db.update_task(t['id'], status='DELIVER', data=t['data'])
         else:
-            t['data']['last_failure'] = checks_mod.failure_report(results)
+            t['data']['last_failure'] = checks_mod.failure_report(failed)
             self.db.update_task(t['id'], data=t['data'])
             self._retry_or_escalate(t)
+
+    # ------------------------------------------------------- failure triage
+    def _base_wt(self, t: dict) -> Path:
+        path = self.cfg.state_dir / 'base-wt' / t['id']
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            git.git(Path(t['repo']), 'worktree', 'add', '--detach', str(path), t['base_ref'])
+        return path
+
+    def _triage_failures(self, t: dict, wt: Path, failed: list) -> list | None:
+        """FLAKY and PRE_EXISTING failures do not block; ENVIRONMENT pauses; CODE is returned."""
+        from .failure_triage import triage
+        cache = t['data'].setdefault('base_checks', {})
+
+        def run_on_base(cmd: str) -> checks_mod.CheckRun:
+            if cmd not in cache:
+                r = checks_mod.run({'base': cmd}, self._base_wt(t))[0]
+                git.discard(self._base_wt(t))
+                cache[cmd] = [r.exit_code, r.output]
+            code, out = cache[cmd]
+            return checks_mod.CheckRun('base', cmd, code, out)
+
+        verdicts = [triage(r, wt, run_on_base, self.decider, task_id=t['id'],
+                           min_confidence=float(self.cfg['failure_triage']['min_confidence']))
+                    for r in failed]
+        git.discard(wt)                      # artefacts from the reruns
+        notes = t['data'].setdefault('triage_notes', {})
+        spec_on = self.cfg['spec_check'].get('enabled', True)
+        for v in verdicts:
+            if v.action == 'PRE_EXISTING' and not spec_on:
+                v.action = 'CODE'            # without the spec judge nobody decides if it had to be fixed
+            if v.action in ('FLAKY', 'PRE_EXISTING'):
+                notes[v.check] = v.action
+        self.db.event('failure_triage', t['id'], verdicts={v.check: v.action for v in verdicts})
+        env = [v for v in verdicts if v.action == 'ENVIRONMENT']
+        if env:
+            outputs = {r.name: r.output for r in failed}
+            t['data']['env_wait'] = True
+            t['data']['env_failures'] = checks_mod.failure_report([r for r in failed if r.name in {v.check for v in env}])
+            self.db.update_task(t['id'], status='WAIT_OWNER', data=t['data'])
+            detail = '\n'.join(f'{v.check}: {outputs[v.check].strip().splitlines()[-1][:200] if outputs[v.check].strip() else ""}'
+                               for v in env)
+            self.n.send(f'Environment problem: {t["id"]}',
+                        f'{t["prompt"][:160]}\nThese checks fail because of the machine/setup, not the code:\n'
+                        f'{detail}\nFix the environment, then Retry. Or treat it as a code failure.',
+                        choices=[('Retry', f'retry {t["id"]}'), ('Treat as code', f'code {t["id"]}'),
+                                 ('Cancel', f'cancel {t["id"]}')], priority=4, tags='wrench')
+            return None
+        codes = {v.check for v in verdicts if v.action == 'CODE'}
+        return [r for r in failed if r.name in codes]
+
+    def env_retry(self, tid: str) -> None:
+        t = self.db.task(tid)
+        t['data']['env_wait'] = False
+        t['data'].get('base_checks', {}).clear()
+        self.db.update_task(tid, status='VERIFY', data=t['data'])
+
+    def env_as_code(self, tid: str) -> None:
+        t = self.db.task(tid)
+        if not t or not t['data'].get('env_wait'):
+            raise ValueError('task is not paused on an environment problem')
+        t['data']['env_wait'] = False
+        t['data']['last_failure'] = t['data'].get('env_failures', '')
+        self.db.update_task(tid, data=t['data'])
+        self._retry_or_escalate(self.db.task(tid))
 
     def _retry_or_escalate(self, t: dict) -> None:
         r = self.cfg['retry']
@@ -362,10 +432,14 @@ class TaskFlow:
         if len(diff) > 60000:
             diff = diff[:60000] + '\n[diff truncated; read the files in the worktree]'
         rebuttals = t['data'].get('rebuttals') or []
+        pre = [k for k, v in (t['data'].get('triage_notes') or {}).items() if v == 'PRE_EXISTING']
+        check_note = (f'\nNote: these required checks still FAIL, exactly as they did on the base commit '
+                      f'before the change: {", ".join(pre)}. If the task or a criterion requires them to '
+                      f'pass, that criterion is unmet.\n' if pre else '')
         prompt = render('spec_judge.md', worktree=wt, prompt=t['prompt'], base=t['base_ref'][:12],
                         criteria='\n'.join(f'{i + 1}. {c}' for i, c in enumerate(criteria)), diff=diff,
-                        rebuttals=('\nThe worker rebutted earlier findings:\n' + '\n'.join(rebuttals) + '\n')
-                        if rebuttals else '')
+                        rebuttals=(('\nThe worker rebutted earlier findings:\n' + '\n'.join(rebuttals) + '\n')
+                                   if rebuttals else '') + check_note)
         res = self.workers.execute(LANES[sc['lane']], prompt, wt, write=False, schema=SPEC_SCHEMA,
                                    log_name=f'{t["id"]}-spec')
         if not res.ok or not res.structured:
@@ -433,7 +507,10 @@ class TaskFlow:
         title = t['prompt'].strip().splitlines()[0][:72]
         git.git(wt, 'reset', '-q', '--soft', t['base_ref'])     # squash the wip snapshots
         spec = t['data'].get('spec_reviews') or []
-        spec_note = (f'Spec review: {len(spec)} round(s)' +
+        triage_notes = t['data'].get('triage_notes') or {}
+        spec_note = ((''.join(f'Note: check {k} {"was flaky (passed on rerun)" if v == "FLAKY" else "already failed on the base commit"}.\n'
+                              for k, v in triage_notes.items())) +
+                     f'Spec review: {len(spec)} round(s)' +
                      (', accepted by owner' if t['data'].get('spec_accepted_by_owner') else ', all criteria met')
                      if spec else 'Spec review: skipped')
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
@@ -449,6 +526,7 @@ class TaskFlow:
         result = f'branch {t["branch"]}{pushed}; commit {sha or "no changes"}'
         self.db.update_task(t['id'], status='DONE', result=result, data=t['data'])
         git.remove_worktree(Path(t['repo']), wt)
+        git.remove_worktree(Path(t['repo']), self.cfg.state_dir / 'base-wt' / t['id'])
         self.n.send(f'Done {t["id"]} ({t["lane"]})',
                     f'{title}\n{result}\n{t["data"].get("checks_result", "")}\n{spec_note}\n{stat[-800:]}',
                     tags='white_check_mark')

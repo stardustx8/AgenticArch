@@ -101,7 +101,8 @@ def triage(tier, cats=(), peer='astra'):
 
 
 class Env:
-    def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex'):
+    def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
+                 triage=True):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -120,6 +121,7 @@ class Env:
             'ntfy': {'enabled': False},
             'delivery': {'push_branch': True},
             'triage': {'policy': policy},
+            'failure_triage': {'enabled': triage},
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -290,7 +292,7 @@ class LocalFlowTests(unittest.TestCase):
                 (cwd / 'done.txt').write_text('ok')
             return Result(True, 'tried', None, [lane.model])
 
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': flaky}, FakeCLM('routine'))
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': flaky}, FakeCLM('routine'), triage=False)
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
@@ -307,7 +309,7 @@ class LocalFlowTests(unittest.TestCase):
     def test_medium_peer_escalates_to_other_model_then_deep(self):
         fail = lambda lane, cwd, prompt, extra: Result(True, 'tried', None, [lane.model])
         self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': fail},
-                       FakeCLM('medium_tough', peer='astra'))
+                       FakeCLM('medium_tough', peer='astra'), triage=False)
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run(60)
         t = self.env.db.task(tid)
@@ -420,6 +422,64 @@ class LocalFlowTests(unittest.TestCase):
         t = self.env.db.task(tid)
         self.assertEqual((t['status'], t['lane']), ('BLOCKED', 'luna_high'))
         self.assertIn('login rejected', t['result'])
+
+    def test_environment_failure_pauses_then_retry_after_fix(self):
+        env_file = self.tmp / 'db-up'
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine', peer='environment'),
+                       checks=f'test -f {env_file} || {{ echo connection refused; exit 1; }}')
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'WAIT_OWNER')
+        self.assertTrue(t['data']['env_wait'])
+        self.assertIn('Environment problem', self.env.sent[-1][0])
+        self.assertEqual(len([c for c in self.env.workers.calls if not c[1].endswith(('-triage', '-spec'))]), 1,
+                         'no worker retry on an environment failure')
+        env_file.write_text('up')
+        self.env.db.inbox_put(f'retry {tid}')
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+
+    def test_environment_can_be_treated_as_code(self):
+        works = []
+
+        def work(lane, cwd, prompt, extra):
+            works.append(prompt)
+            return Result(True, 'done', None, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine', peer='environment'),
+                       checks='echo connection refused; exit 1')
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        self.env.db.inbox_put(f'code {tid}')
+        self.env.run(3)
+        self.assertEqual(len(works), 2)
+        self.assertIn('connection refused', works[1])
+
+    def test_flaky_check_passes_without_worker_retry(self):
+        flag = self.tmp / 'flaky-once'
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine', peer='code'),
+                       checks=f'test -f {flag} || {{ touch {flag}; exit 1; }}')
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['passes']), ('DONE', 1))
+        msg = sh(self.env.target, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
+        self.assertIn('was flaky', msg)
+
+    def test_pre_existing_failure_goes_to_judge_with_note(self):
+        prompts = []
+
+        def judge(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
+                       FakeCLM('routine', peer='code'), checks="echo 'Error: legacy broken'; exit 1")
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertIn('base commit before the change: test', prompts[0])
+        self.assertFalse((self.env.cfg.state_dir / 'base-wt' / tid).exists(), 'base worktree cleaned up')
 
     def test_billing_error_blocks_without_dispatch(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'billing_error': True},

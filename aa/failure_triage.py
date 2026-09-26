@@ -1,14 +1,16 @@
-"""Failure triage for failed checks (prototype; not yet wired into the daemon).
+"""Failure triage for failed checks (used by TaskFlow._verify; see config failure_triage).
 
 Decides what the coordinator should do with a failed check instead of always sending
 the worker back:
   1. rerun the failed check once            -> passes now: FLAKY (no worker retry)
-  2. run it on the base commit (clean tree) -> fails there too: PRE_EXISTING (report, don't blame the worker)
-  3. ask the local decider (SemIf)          -> environment with confidence >= threshold:
+  2. ask the local decider (SemIf)          -> environment with confidence >= threshold:
                                                ENVIRONMENT (pause + ping the owner)
+  3. run it on the base commit (clean tree) -> fails the same way: PRE_EXISTING (the spec judge
+                                               decides whether the task had to fix it)
   4. otherwise                              -> CODE (send back to the worker, as today)
-Steps 1-2 are deterministic; only step 3 is a model judgement (eval/PROBES.md:
-environment recall 100%, precision 83% at conf >= 0.5).
+Environment is asked before the base comparison because a broken environment breaks the
+base commit too. Steps 1 and 3 are deterministic; step 2 is a model judgement
+(eval/PROBES.md: environment recall 100%, precision 83% at conf >= 0.5).
 """
 from __future__ import annotations
 
@@ -45,13 +47,13 @@ def triage(failed: checks_mod.CheckRun, worktree: Path, run_on_base: Callable[[s
     rerun = checks_mod.run({failed.name: failed.command}, worktree)[0]
     if rerun.ok:
         return Verdict(failed.name, 'FLAKY', 'failed once, passed on immediate rerun')
-    base = run_on_base(failed.command)
-    if not base.ok and _same_failure(base.output, rerun.output):
-        return Verdict(failed.name, 'PRE_EXISTING', 'fails the same way on the base commit')
     pick, probs, _ = decider.choose('failure_cause', task_id, f'$ {failed.command}\n{rerun.output[-4000:]}',
                                     QUESTION, OPTIONS)
     if pick == 'environment' and probs and _confidence(probs) >= min_confidence:
         return Verdict(failed.name, 'ENVIRONMENT', 'local decider: machine/setup problem', probs)
+    base = run_on_base(failed.command)
+    if not base.ok and _same_failure(base.output, rerun.output):
+        return Verdict(failed.name, 'PRE_EXISTING', 'fails the same way on the base commit', probs)
     return Verdict(failed.name, 'CODE', 'send back to the worker', probs)
 
 

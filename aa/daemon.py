@@ -63,6 +63,8 @@ class App:
                 self.retry(ident)
             elif verb == 'accept':
                 self.tasks.accept_spec(ident)
+            elif verb == 'code':
+                self.tasks.env_as_code(ident)
             else:
                 self.db.event('reply_ignored', line=line)
                 return
@@ -87,6 +89,9 @@ class App:
     def retry(self, ident: str) -> None:
         """Re-run a BLOCKED/FAILED task from triage, or a FAILED case from its last Pro wait."""
         t = self.db.task(ident)
+        if t and t['status'] == 'WAIT_OWNER' and t['data'].get('env_wait'):
+            self.tasks.env_retry(ident)       # environment fixed: run the checks again
+            return
         if t and t['status'] == 'WAIT_OWNER' and t['data'].get('spec_wait'):
             self.tasks.spec_more(ident)       # one more spec loop
             return

@@ -104,3 +104,13 @@ not pre-approved) plus hard permission denies (git push/remote/config, sudo, ssh
 credential files) and --strict-mcp-config. `workers.claude_guard = "sandbox"` remains for
 hosts that allow nesting. Verified live: normal work runs; an explicitly requested force
 push was allowed by the classifier alone, hence the deterministic deny list.
+
+## D019: failure triage wired in, added 2026-09-26
+
+Failed checks are rerun once (FLAKY), then SemIf judges environment vs code (ENVIRONMENT
+pauses and asks the owner instead of retrying/escalating), then the base commit is checked
+(PRE_EXISTING does not trigger a blind retry; the spec judge is told the check still fails and
+decides whether the task required fixing it; without the spec check it blocks as CODE).
+Environment is asked before the base comparison because a broken environment breaks the base
+commit too. Seen live on 2026-09-26: an auth/infra failure burned four worker attempts before
+this existed.
