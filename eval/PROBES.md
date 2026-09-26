@@ -47,3 +47,10 @@ files the change touched; SemIf saw them before the output. At 0.7 — plain: de
 2 misses, test 3 / 0; with context: dev 0 / 2, test 2 / 1 (an explicit "missing in-repo module
 points to the code" hint: identical). No gain within noise (15 environment rows per split) ->
 not built.
+
+Follow-up (loop/jev article rules "give every choice an exit" and "calibration"): adding an
+`other` option to the failure-cause question changed nothing useful (never picked; test: one
+more missed environment failure) -> not adopted. Calibration of the current wording over all
+90 rows: confidence 0.9+ n=69 accuracy 0.83; 0.6-0.9 n=9 0.67; 0.3-0.6 n=6 0.50; <0.3 n=6 0.00.
+Confidence ranks correctly but SemIf is overconfident at the top, which supports using it
+only to flag (never to decide alone).
