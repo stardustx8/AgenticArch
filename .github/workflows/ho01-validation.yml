@@ -1,0 +1,34 @@
+name: HO-01 validation
+on:
+  push:
+    branches: ['pro/harness-opt-01']
+  pull_request:
+    branches: ['m1-working-runtime']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate runtime and kit
+        shell: bash
+        run: |
+          mkdir -p /tmp/ho01-evidence
+          git rev-parse HEAD > /tmp/ho01-evidence/source-sha.txt
+          python3 --version > /tmp/ho01-evidence/python-version.txt
+          python3 -m unittest discover -s tests 2>&1 | tee /tmp/ho01-evidence/unittest.txt
+          python3 tools/check_kit.py 2>&1 | tee /tmp/ho01-evidence/check-kit.txt
+      - name: Archive tracked source for reproducible offline review
+        if: always()
+        run: git archive --format=tar HEAD > /tmp/ho01-evidence/source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ho01-validation-${{ github.sha }}
+          path: /tmp/ho01-evidence/
+          retention-days: 7
+          if-no-files-found: error
