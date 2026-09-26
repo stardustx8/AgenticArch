@@ -121,6 +121,9 @@ def doctor(cfg) -> int:
             line('CLM deployment digest', len(clm.deployment_digest()) == 64)
         except Exception as exc:
             line('CLM tokenizer/digest', False, repr(exc))
+    if cfg['local_llm'].get('enabled', True):
+        line('local model (judge/test writer)', w.local_available(),
+             f"{cfg['local_llm']['model']} at {cfg['local_llm']['url']}")
     try:
         urllib.request.urlopen(cfg['ntfy']['url'] + '/v1/health', timeout=5).read()
         line('ntfy', True, cfg['ntfy']['url'])
