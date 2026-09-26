@@ -1,0 +1,12 @@
+[Unit]
+Description=AgenticArch CLM System One API (loopback)
+After=aa-clm-embed.service
+Requires=aa-clm-embed.service
+
+[Service]
+ExecStart=%h/.local/share/agenticarch/clm-venv/bin/clm-serve --host 127.0.0.1 --port 8700 --emb-url http://127.0.0.1:8090/v1/embeddings --emb-model qwen3-8b --max-tokens 2048 --no-download --no-ui
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

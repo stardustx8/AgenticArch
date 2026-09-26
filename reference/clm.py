@@ -128,8 +128,3 @@ class CLMClient:
         if self._attest() != self.deployment:
             raise ValueError('CLM changed during scoring; invalidate this result')
         return parse_choice(json.loads(raw), payload, self.deployment)
-
-# Preserve the concurrently published generic-choice API without changing callers.
-# Its transport requires caller-side deployment/freshness checks; new routing uses
-# CLMClient above, which performs the explicit before/after deployment check.
-from .clm_compat import LocalCLM, PreparedChoice, normalize_choice, prepare_choice, render_state

@@ -1,0 +1,48 @@
+# Copy to ~/.config/agenticarch/aa.toml. Every key is optional (defaults in aa/config.py).
+
+[case_repo]
+url = "git@github.com:stardustx8/GPT-Pro-Escalation.git"   # PRIVATE repo for deep cases
+slug = "stardustx8/GPT-Pro-Escalation"
+
+[ntfy]
+url = "http://127.0.0.1:8093"           # daemon -> ntfy (loopback)
+public_url = "http://100.114.173.57:8093" # phone -> ntfy (tailnet); action buttons post here
+topic = "agenticarch"
+reply_topic = "agenticarch-replies"
+
+[decider]
+backend = "semif"         # semif (default, see eval/results) | clm
+min_confidence = 0.2      # below this a vote is treated as an abstention
+
+[semif]
+socket = "~/.local/share/agenticarch/semif/run/semif.sock"
+
+[clm]
+url = "http://127.0.0.1:8700"
+
+[triage]
+model = "gpt-6-luna"
+effort = "high"
+policy = "codex"          # codex | higher_if_1 | ask_on_disagreement (see eval/RESULTS.md)
+
+[deep]
+challenge_rounds = 5
+max_pro_reviews = 2       # CLARIFY reviews before the case pauses for the owner
+challengers = ["opus_high", "astra_high"]
+
+[workers]
+claude_guard = "auto"      # auto | sandbox (needs nested userns) | acceptEdits
+max_parallel = 3
+timeout_s = 3600
+
+[spec_check]
+enabled = true
+lane = "opus_medium"     # independent reviewer after checks pass
+max_loops = 3             # then the owner decides (Accept / One more / Cancel)
+
+[delivery]
+push_branch = true        # push aa/<task> branches to origin after checks pass
+
+[git]
+name = "AgenticArch aa"
+email = "stardustx8@users.noreply.github.com"

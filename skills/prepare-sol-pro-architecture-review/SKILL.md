@@ -1,38 +1,31 @@
 ---
 name: prepare-sol-pro-architecture-review
-description: "Prepare and coordinate GPT-6 Pro web deep review with a scoped evidence ZIP, durable same-case chat and selectable Fable 5.1 or Opus 5.5 adversarial partner. Preserve the exact identifier."
+description: "Start a GPT-6 Pro deep case for tough work (architecture, research, consequential design) through the AgenticArch coordinator: private case branch, one-line Pro prompt, Opus x Astra challenge rounds, Pro GO and implementation. Legacy identifier kept for compatibility."
 ---
 
-# Prepare a GPT-6 Pro architecture/research review
+# Start a GPT-6 Pro deep case
 
-Use for tough work, architecture, research, consequential design or explicit invocation. The required anchor is actual GPT-6 Pro in ChatGPT web, not an API call or a model role named Pro. The legacy skill name does not select Sol. The original local coordinator can be Codex or Pi.
+Use for tough work, architecture, research, security/migration/irreversible design,
+or when the owner explicitly asks for Pro. The legacy name does not select Sol or
+Astra Max; the anchor is GPT-6 Pro in ChatGPT web with the GitHub connector.
 
-Read [protocol](references/protocol.md), [handoff template](references/handoff-template.md) and [transport gate](references/transport-gate.md). These are complete local references.
+Read [protocol](references/protocol.md) for the full flow.
 
-## Recover or initialize
+## Steps
 
-Recover the task/session, case branch/path, current input commit, requirement/evidence digests, Pro chat binding, permission scope and selected Claude peer. Reuse an existing case and its exact Pro conversation. Select Fable 5.1 high or Opus 5.5 high through the qualified subscription worker catalog. Freeze the model in the review epoch. Fable 5.5 is not an available choice until explicitly released, qualified and activated.
+1. Make sure the relevant local changes are committed (the case starts from HEAD and
+   the coordinator pushes that commit as `aa/base-<case>` so Pro can read it). The
+   target repo must have a GitHub origin the ChatGPT connector can access.
+2. Write the task as the owner stated it, plus concrete acceptance criteria and known
+   constraints. Separate facts from assumptions; do not invent requirements.
+3. Queue it: `aa task --tier tough --repo <repo> "<task>"`.
+4. The coordinator creates `case/<id>` in the private repo `stardustx8/GPT-Pro-Escalation`
+   with BRIEF.md and PRO-TURN-01.md and sends the owner an ntfy push with a one-line
+   prompt. `aa prompt <case>` prints it again. The owner pastes it into a NEW Pro chat
+   (connector on) named `AA <case>`, and every later turn into that SAME chat.
+5. From then on the daemon continues automatically; see fable-adversarial-review for
+   the challenge rounds. Report the task/case id and the prompt; do not claim Pro has
+   run until `aa status` shows the next phase.
 
-Use the authorized GPT-Pro-Escalation workspace. Creating it, changing visibility, pushing or exporting real context needs applicable existing authorization. Do not infer write access from a repository name. Preserve owner edits and concurrent work.
-
-## Build the package
-
-Inventory all in-scope artifacts and read primary evidence completely where completeness matters. Cover models/tools/versions, constraints, topology/lifecycle, relevant code and tests, prior attempts and unknown local facts. Separate observed facts, owner choices, primary-source claims, candidate conclusions and inference. Label omitted or unreviewed evidence.
-
-Create context.zip, PROMPT.md, MANIFEST.json and a private runtime record. Include exact attachment names, source classes and per-file hashes. Hash the completed ZIP separately. Use scoped allowlists and a stable snapshot including relevant dirty changes. Reject traversal, symlinks and special files. Remove credentials, recovery values, unique identifiers, unrelated customer data and unnecessary private topology. Bind approved export to actual bytes and destination.
-
-Local CLM can suggest relevant evidence or gaps; it cannot approve export, drop mandatory constraints or replace source evidence with unsupported summaries. New CLM deployment or calibration must be qualified independently of any earlier backend.
-
-## Contract and submission
-
-Ask Pro for a complete final solution, implementation/validation/rollback plan and concise decision/objection record. Candidate plans are challengeable and replaceable. Require current primary-source checks for unstable claims and citations near material facts. Carry unresolved owner choices as conditional branches. Do not request private chain-of-thought, a fixed number of findings or agreement at any cost.
-
-Resolve all placeholders. Name the exact repository, branch, case and input digests. Prefer direct Git contribution only when that Pro chat actually exposes authorized writes. Otherwise request exact files for a clearly labelled coordinator relay.
-
-Follow the transport gate. Manual Pro transfer is the current default. Do not automate ChatGPT via a workaround or substitute paid API use. Prepare a first-turn or same-chat continuation marker, persist it before submission and verify the actual receipt. Pause for missing auth/permission or a genuinely unavailable owner decision. Do not claim unconfigured background work.
-
-## Completion and automatic continuation
-
-Retrieve the actual Pro output. Verify case/epoch/input identity, required artifacts, allowed changes, evidence status and durable repository readback. A text claim or spinner disappearance is insufficient. Then invoke **fable-adversarial-review** with the exact case, original task binding, selected Claude model, Pro conversation and input commit. No further owner prompt is needed when this continuation is already authorized.
-
-Report the produced bundle, actual handoff mode, durable commit or pending action. Do not claim installed skills, automatic submission or an independent review without receipts. For reusable skill changes, run scoped synthetic forward tests and distinguish them from actual model participation.
+No ZIP upload is needed: Pro reads the case branch and the target repo directly.
+Never put secrets or unrelated private data into BRIEF.md or the case branch.

@@ -1,0 +1,5 @@
+{
+ "id": "b2_ledger_reversals_idempotency",
+ "tier_hint": "medium_tough",
+ "prompt": "Two things for the ledger. `transfer()` should take an optional `idempotency_key`: retrying with the same key and the same arguments (src, dst, amount and memo) returns the original transaction id without moving money again, but reusing a key with different arguments must raise a new `IdempotencyConflict` error (a `LedgerError`, next to the others in `ledger/errors.py`); a transfer that fails (e.g. insufficient funds) shouldn't burn its key. Also add `Ledger.reverse(txn_id)`, which posts a compensating transfer from the original dst back to the src and returns its id: a transaction can only be reversed once, reversals themselves can't be reversed, and unknown ids are an error (raise `LedgerError` subclasses for all of these), while a reversal is still subject to the normal overdraft rule (`InsufficientFunds`). Failed operations must leave balances and history untouched."
+}

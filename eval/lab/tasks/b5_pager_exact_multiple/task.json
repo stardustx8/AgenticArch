@@ -1,0 +1,6 @@
+{
+ "id": "b5_pager_exact_multiple",
+ "tier_hint": "bounded",
+ "prompt": "With exactly 10 results at 5 per page, the pager says there are 3 pages and page 3 is empty. It only seems to happen when the total is an exact multiple of per_page. Can you fix it?",
+ "trap": "defect_twins"
+}

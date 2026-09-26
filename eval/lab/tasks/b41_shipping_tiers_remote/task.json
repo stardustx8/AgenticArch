@@ -1,0 +1,6 @@
+{
+ "id": "b41_shipping_tiers_remote",
+ "tier_hint": "medium_tough",
+ "prompt": "Parcels that weigh exactly a tier limit are being treated as the next tier up (a 2 kg parcel pays the 5 kg price, and a 20 kg one gets rejected) -- tier limits are inclusive. We also want heavyweight pricing: instead of rejecting billable weights over 20 kg, charge the top-tier price plus the zone's `EXTRA_PER_KG` for every started kg above the top tier, and only raise `Overweight` when the parcel's actual weight is over 70 kg. And wire up the remote-area surcharge that's sitting unused in rates.py: if the destination ZIP starts with one of `REMOTE_PREFIXES`, the package is zone 5 wherever it ships from and pays `REMOTE_SURCHARGE_CENTS` (expose it as `Quote.remote`, 0 otherwise), and fuel is charged on it just like on the residential fee.",
+ "trap": "defect_twins"
+}

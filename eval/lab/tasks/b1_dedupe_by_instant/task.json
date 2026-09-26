@@ -1,0 +1,5 @@
+{
+ "id": "b1_dedupe_by_instant",
+ "tier_hint": "bounded",
+ "prompt": "dedupe_latest compares updated_at as strings, which goes wrong now that the partner feed sends timestamps with offsets (`+02:00`) and fractional seconds alongside our `Z` ones. Compare them as real instants; a timestamp with no offset is UTC. If two rows for the same key have the same instant, the one later in the input wins. Output order should stay as it is (first appearance of each key)."
+}

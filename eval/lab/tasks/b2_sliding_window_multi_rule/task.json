@@ -1,0 +1,5 @@
+{
+ "id": "b2_sliding_window_multi_rule",
+ "tier_hint": "medium_tough",
+ "prompt": "The fixed-window limiter lets clients burst 2x the limit across a window boundary. Switch `RateLimiter` to a sliding window \u2014 a hit at time t counts until (but not including) t + window \u2014 and let one limiter enforce several rules at once, e.g. `RateLimiter(rules=[Rule(5, 1.0), Rule(100, 60.0)], clock=...)` with `Rule` defined in `ratelimit/limiter.py`; existing `RateLimiter(limit, window)` callers must keep working, and a rule with limit <= 0 or window <= 0 is a ValueError. A request is allowed only if every rule allows it, and a denied request must not count against any rule. Also add `retry_after(key)` returning the seconds until that key's next request would be allowed (0.0 if it would be allowed now) without recording anything, and have the middleware send it on 429s as a `Retry-After` header (whole seconds, rounded up)."
+}

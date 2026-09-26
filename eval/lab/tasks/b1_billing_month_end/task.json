@@ -1,0 +1,5 @@
+{
+ "id": "b1_billing_month_end",
+ "tier_hint": "medium_tough",
+ "prompt": "Subscriptions anchored on the 29th\u201331st break billing: add_months(date(2024, 1, 31), 1) raises. Clamp to the last day of the target month, but schedules must keep the original anchor day \u2014 a Jan 31 subscription bills Feb 29, Mar 31, Apr 30, not Mar 29. While you're in there, prorate() should round half-up to cents, return the full amount when the change is on/before the period start and 0.00 when it's on/after the end. Also add current_period(anchor, on_date) to billing/schedule.py that returns the (start, end) of the period containing on_date (end exclusive); dates before the anchor are a ValueError."
+}

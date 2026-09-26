@@ -1,0 +1,6 @@
+{
+ "id": "b41_coupon_tax_allocation",
+ "tier_hint": "medium_tough",
+ "prompt": "Coupons are being taken off after tax, so customers pay tax on money they never paid. Coupons must reduce each line's taxable amount instead (tax is still worked out per line and rounded to the cent; exempt categories stay exempt but still absorb their share of a coupon). Coupons apply in the order they were entered, each on the line amounts left by the previous ones: a percentage coupon comes off each eligible line separately (rounded to the cent), and a fixed coupon is capped at what is left on its eligible lines and split across them in proportion to their remaining amounts, each share rounded to the cent except the last such line's, which gets whatever is left of the coupon -- lines already down to zero get no share and nothing may go negative. Expose the per-line tax as `line_taxes` (sku -> Decimal, zero-tax lines included) on `PriceBreakdown` and on the order record, and persist it in orders.json; orders saved before this change don't have that field and must keep working (they load with an empty `line_taxes`).",
+ "trap": "data_loss"
+}

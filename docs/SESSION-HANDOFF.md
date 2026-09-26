@@ -1,39 +1,36 @@
-# Current session handoff
+# Session handoff
 
-Updated 2026-09-25. Prepared from 8b96744 and reconciled with concurrent commits through 294ebcb0 before publication. This revision implements the owner-authorized CLM, dual-harness, peer-model and subscription-efficiency changes in the implementation kit.
+Updated 2026-09-25 (Claude Code session on the workstation, branch `m1-working-runtime`).
 
-## Current requirements
+## State
 
-Local CLM replaces the former decision backend. Luna low/high only; Astra high and Opus 5.5 medium/high are medium-tier peers. Deep work uses GPT-6 Pro web plus Fable 5.1 high or Opus 5.5 high. Fable 5.5 remains pending. Remote work is subscription-only with no API/paid-overflow fallback. Both harness packages share one core on main.
+The `aa` runtime is installed and running on the workstation (see
+[IMPLEMENTATION-STATUS](../IMPLEMENTATION-STATUS.md) for what was verified live). Owner
+decisions are in [OWNER-REQUIREMENTS](OWNER-REQUIREMENTS.md) v3 and DECISIONS D011-D015.
 
-## Added and changed
+Setup done this session: GitHub SSH key (`~/.ssh/id_ed25519_github`), Claude Code CLI
+(Max login), uv + CLM venv (vLLM 0.30, contrastive-lm), CLM head download, Qwen3-8B,
+ntfy (rootless Docker) + Tailscale forwarder, systemd user units, `~/.config/agenticarch/aa.toml`.
+The private case repo stardustx8/GPT-Pro-Escalation is reachable and empty until the
+first case initializes it.
 
-Versioned model/evidence catalogs and CLM-suitable decision templates; strict loopback CLM wire client and tokenizer/deployment checks; qualified route filtering; bounded generation leases and applied-setting acknowledgments; subscription quota attribution; selectable reviewer identity and review epochs; both harness packages with checkpoint/Pi adapter contracts; directly revised exact-name skills; updated requirements, implementation instructions and acceptance records.
+## Next steps
 
-The research distinguishes primary benchmark scope, mixed efforts/fallbacks, firsthand editorial limits and owner policy. Native Pi and delegated workers are not conflated. The accessible editorial summaries were read; no unseen full video or unavailable local benchmark is claimed.
+0. Open PR: https://github.com/stardustx8/AgenticArch/pull/2 (review/merge by owner).
+   Candidates still open (eval/PROBES.md): SemIf secret gate, worker status field.
+   Done this session: spec-check loop (D017), Claude guard (D018), failure triage (D019).
+   Codex 401s on 2026-09-26 night resolved after the desktop app refreshed the shared login.
+1. (Done: triage policy = Codex decides.) Owner decision: triage policy — Codex alone, or Codex + SemIf with ask-on-disagreement
+   (~20% pings) or take-higher-if-1-apart (~6% pings). Data: eval/RESULTS.md.
+2. First real deep case against a GitHub target repo (owner pastes the Pro prompts).
+3. Install skills on the Mac (`tools/install_skills.py`).
+4. Re-run `tools/eval_decisions.py` on the owner's logged real tasks.
+5. Optional: `sudo loginctl enable-linger rosh` so units run without a login session.
 
-## Verified scope
+Decided 2026-09-25 (second session): SemIf replaces CLM (D016); no Codex fork, model-only
+switching (D015). SemIf model copied from the SHARED archive to
+`~/.local/share/agenticarch/semif/` (sha256 verified), served by `aa-semif`.
 
-See VALIDATION-REPORT for exact offline results. Python tests and the Pi structural fixture exercise reference logic, not installed model inference or provider billing. No actual workstation installation, native checkpoint acceptance, native Pi subscription qualification, independent Pro/Claude review or measured quota saving has occurred.
+## Sandbox
 
-## Concurrent work preserved
-
-Commits 29f554b and f3538855 added a revision ledger and a generic CLM client with 13 tests. Preserve that API through `reference.clm` compatibility exports and its unchanged implementation/tests. The canonical requirement IDs and revision-local IDs are explicitly mapped in REVISION-2026-09-25.md. The integrated suite has 189 passing Python tests, including 25 concurrent routing tests whose only edit is the versioned fixture path. Do not discard the compatibility API or assume it provides live deployment supervision by itself.
-
-The subsequent concurrent commit 10592526 added six research/profile documents, all retained. Commit 294ebcb0 adds the retained v1 routing/compiler work. Read INTEGRATION-RECONCILIATION.md for active versus compatibility contracts and registry/profile mappings.
-
-## Open gates
-
-Automatic Pro web submission remains unqualified under current official Computer Use guidance; keep manual same-chat transfers. The separate GPT-Pro-Escalation runtime repo has not been provisioned by this revision. Actual local paths/helpers, supported subscription model access, provider observers, cache/compaction and cancellation must be discovered and tested privately. No license decision or new paid service is introduced.
-
-## Next concrete session
-
-Read START-HERE and the implementation prompt, then run offline checks. On the workstation perform Phase 0 read-only discovery and choose the initial Codex or Pi package without discarding the other. Bind one real subscription worker and actual verification first; then CLM shadow mode, adaptive effort and expanded deep-review receipts. Commit only sanitized capability evidence. Do not substitute another architecture essay for implementing specified interfaces.
-
-## Closeout
-
-Refresh main and preserve other sessions. Update this handoff, status and affected decisions with actual changes, commands/results, live-versus-fixture evidence, blockers and next action. Read back publication; never infer it from permission metadata or an unreferenced Git object.
-
-## 2026-09-25 reconciliation
-
-PR #1 (participant-bound policy) is merged into `main`. `main`'s participant implementation (`claude` role, `model_id`, `review_epoch`) is canonical, and the PR's regressions are ported. See [INTEGRATION-RECONCILIATION-2026-09-25.md](INTEGRATION-RECONCILIATION-2026-09-25.md). No parallel integration is pending.
+`~/dev/aa-sandbox` is a local test repo used for the live smoke tests.

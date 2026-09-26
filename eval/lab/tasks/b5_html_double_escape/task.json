@@ -1,0 +1,6 @@
+{
+ "id": "b5_html_double_escape",
+ "tier_hint": "bounded",
+ "prompt": "Page titles containing '<' show up as a literal '&lt;' in the browser: render_title('a < b') gives '<h1>a &amp;lt; b</h1>'. Can you fix it?",
+ "trap": "defect_twins"
+}

@@ -1,42 +1,33 @@
 ---
 name: fable-adversarial-review
-description: "Coordinate real GPT-6 Pro web and a selected Claude Fable 5.1 or Opus 5.5 adversarial review in GPT-Pro-Escalation, preserve the same Pro chat, then return to the original Codex or Pi coordinator."
+description: "Run or inspect the adversarial challenge rounds of an AgenticArch deep case: Claude Opus 5.5 high (Fable 5.5 once qualified) and GPT-6 Astra high co-edit Pro's solution, then Pro gives GO or CLARIFY. Legacy identifier kept; it no longer means Fable implements or Sol reviews."
 ---
 
-# Pro and selected-Claude adversarial co-production
+# Deep-case challenge rounds (Opus x Astra, Pro decides)
 
-Activate after prepare-sol-pro-architecture-review verifies Pro's initial complete contribution, or when explicitly requested for a prepared case. An ordinary Claude Code request alone is not this workflow. If no case exists, prepare one once, not a recursive chain of new cases.
+The challenge rounds are run by the `aa` daemon automatically after Pro's draft (see
+[protocol](references/protocol.md)). Use this skill when the owner asks about a case's
+debate, wants to steer it, or wants a round re-run.
 
-Read [protocol](references/protocol.md), [turn template](references/review-turn-template.md) and [transport gate](references/transport-gate.md). Retain this exact skill identifier even when Opus is the selected participant.
+## What happens
 
-## Recover actual participants
+- Challengers: `claude-opus-5-5` high (via the Claude Max CLI) and `gpt-6-astra` high
+  (via Codex). Fable 5.5 replaces Opus only after explicit release, access and
+  regression qualification; Fable 5.1 is no longer used.
+- Each turn: independent check of SOLUTION.md against BRIEF.md and the real target code,
+  direct fixes in SOLUTION.md, objection ledger rows (ID, raised by, evidence, status,
+  resolution), and a turn file ending in `VERDICT: AGREE|REVISE`.
+- Up to 5 rounds per cycle; both AGREE ends early. Then Pro reviews in the same chat.
+- Material issues are correctness, security, data loss, concurrency, compatibility,
+  recovery, migration, testability and feasibility. No invented findings.
 
-Read the installed claude-code:use-claude-code skill and actual bridge schema. Use the user's unmodified, authenticated Claude Code worker with normal subscription access. Do not transfer subscription tokens into Pi or enable API/paid-overage fallback. Verify the actual model and high effort: claude-fable-5-1 or claude-opus-5-5. An alias, requested label or self-description alone is insufficient. Future Fable versions require explicit qualification and activation.
+## Steering
 
-Recover original coordinator/task, case/epoch, requirements/bundle/solution identities, latest durable Git commit, exact Pro chat and Claude worker binding. Keep one active coordinator and serialized participant write windows. Preserve existing helper scripts and permission enforcement.
+- Inspect: `aa show <case>`; read the case branch `case/<id>` in
+  `stardustx8/GPT-Pro-Escalation` (turn files under `cases/<id>/turns/`).
+- Owner guidance or answers: `aa answer "answer <case> <text>"` (committed to
+  OWNER-ANSWERS.md; starts the next cycle when the case waits or is paused).
+- Resume a paused case: `aa answer "resume <case>"`. Cancel: `aa answer "cancel <case>"`.
 
-## Challenge and revision
-
-Give Claude raw requirements and evidence first for an independent assessment, then the exact Pro proposal and dialogue. Seek concrete correctness, security, data-loss, concurrency, compatibility, recovery, regression and implementation failures. Do not invent findings to create activity.
-
-The worker edits only scoped review-case artifacts and records immutable turns plus append-only DIALOGUE contributions. Target-project patches remain proposals until the original coordinator implements. Each finding has an ID, evidence, consequence, remedy or rebuttal, severity and status. CLM may suggest links/evidence but cannot close or suppress findings.
-
-Retrieve terminal worker results promptly; use the actual event stream or bounded foreground polling, about 20 seconds where supported. Do not abandon jobs or promise unconfigured background monitoring. Respect cancellation, capacity limits and permissions.
-
-After Claude's durable contribution, continue GPT-6 Pro in the **same established chat** with the exact new commit, epoch/digests and unresolved objections. Use a permitted UI transport only when qualified; otherwise prepare the explicit manual continuation/delta pack. Never start a fresh Pro chat because a process resumed.
-
-Pro fixes or rebuts each material issue with evidence, leaves unresolved items open, and challenges flawed Claude remedies. Then Claude reviews that revised result. Continue automatically within the existing task authorization until genuine agreement or a real permission/input/external-verification gate. Budgets pause resumably, never manufacture convergence.
-
-## Identity, convergence and local return
-
-Freeze the Claude model per epoch. Switching Fable/Opus or activating a successor starts a new epoch and invalidates both approvals, while retaining prior turns and carrying all unresolved objections. Require a fresh actual Claude challenge and subsequent Pro response; no single model plays both roles.
-
-Both actual participants must approve the same current solution, requirements and bundle digests with no unresolved material objection. Any approval-relevant change, later rejection, unanswered contribution or identity mismatch invalidates stale approval. Silence and high CLM scores are not agreement.
-
-At convergence, the original Codex or Pi coordinator fetches the pinned result, checks current local facts and records adaptations in LOCAL-DELTA. Implement faithfully. Mechanical adjustments preserving invariants may proceed; architecture/security/data/acceptance/rollback changes reopen the same case and Pro chat. Inspect the final diff and run the actual required checks. Remote agreement does not establish local success.
-
-## Authority and report
-
-Consensus grants no new commit, push, deployment, export, purchase or account authority. Continue already-authorized operations only within the same target/scope and current prerequisites. Ask only for genuinely missing permission or an undiscoverable material decision.
-
-Report the agreed case revision, actual participant identities, findings/remedies, local changes and tests, adaptations and remaining gates. Label manual transfers, native writes and coordinator relays truthfully. Never describe a paused debate as accepted or offline fixtures as live qualification.
+Consensus is not verification: completion requires the target repo's checks to pass on
+Pro's implementation branch. Nothing here grants merge, deploy or account authority.

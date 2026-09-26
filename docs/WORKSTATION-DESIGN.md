@@ -10,4 +10,4 @@ The runtime inventory must establish exact model identities and available effort
 
 CLM may improve context, diagnostics and evidence coverage. Extra generative agents, graph databases and broad best-of-N code generation are not mandatory. Qualify each optional helper with the decision-family and quota evaluations. A workstation with spare VRAM does not make an unmeasured architecture superior.
 
-The first deliverable after local discovery is a narrow working loop using one qualified worker, real tests and durable recovery. Add peers, adaptive effort and deep-review automation only behind their own acceptance gates. See [implementation](IMPLEMENTATION-PLAN.md) and the two [harness packages](../README.md).
+The first deliverable after local discovery is a narrow working loop using one qualified worker, real tests and durable recovery. Add peers, adaptive effort and deep-review automation only behind their own acceptance gates. See [implementation](archive/IMPLEMENTATION-PLAN.md) and the two [harness packages](../README.md).
