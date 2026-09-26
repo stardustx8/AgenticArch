@@ -40,3 +40,10 @@ The remaining false alarms are not borderline: missing in-repo modules / undefin
 fixes these; context does (e.g. the files the worker changed: a missing module inside the repo is
 code). Labels were re-read; no labelling errors found. Most "flaky" rows are caught live by the
 deterministic rerun before SemIf is asked.
+
+Follow-up, same day: repo context for the decider (Jev article idea "give it the source to
+check against"). Opus wrote, blind to the labels, each row's top-level repo entries and the
+files the change touched; SemIf saw them before the output. At 0.7 — plain: dev 1 false alarm /
+2 misses, test 3 / 0; with context: dev 0 / 2, test 2 / 1 (an explicit "missing in-repo module
+points to the code" hint: identical). No gain within noise (15 environment rows per split) ->
+not built.
