@@ -17,6 +17,7 @@
   failed, SemIf said ENVIRONMENT, task paused with ntfy buttons (no retry, no escalation);
   after the environment was fixed and `retry` sent, checks + Opus spec review passed, delivered.
 - Claude workers: auto-mode classifier + hard denies, no MCP connectors (D018).
+- Oracle tests + mutation gate + cross-vendor best-of-2 (D020), live t0926-ac228.
 
 ## Implemented, tested offline, not yet exercised live
 

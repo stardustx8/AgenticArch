@@ -35,7 +35,9 @@ PICK_SCHEMA = {
     'properties': {'winner': {'type': 'string', 'enum': ['A', 'B']}, 'reason': {'type': 'string'}},
 }
 SOURCE_EXT = ('.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java', '.kt', '.rb', '.php', '.cs')
-MUTATIONS = [  # (pattern, replacement) applied to one occurrence on one added line
+PY_OPS = {'==': '!=', '!=': '==', '<': '<=', '<=': '<', '>': '>=', '>=': '>', '+': '-', '-': '+', '*': '/',
+          '//': '*', '%': '*', 'and': 'or', 'or': 'and', 'True': 'False', 'False': 'True', 'is': 'is not'}
+MUTATIONS = [  # (pattern, replacement) for non-Python code; one per line, outside strings/comments
     (r'==', '!='), (r'!=', '=='), (r'<=', '<'), (r'>=', '>'), (r'(?<![<>=!])<(?![<=])', '<='),
     (r'(?<![<>=!-])>(?![>=])', '>='), (r'(?<![+\-])\+(?![+=])', '-'), (r'(?<![+\-])-(?![-=>])', '+'),
     (r'(?<!\*)\*(?![*=])', '/'), (r'\bTrue\b', 'False'), (r'\bFalse\b', 'True'), (r'\btrue\b', 'false'),
@@ -176,28 +178,24 @@ class QualityMixin:
                  if f.endswith(SOURCE_EXT) and not _is_test_path(f) and f not in oracle['files']]
         mutants = []
         for f in files:
-            for ln in _added_lines(wt, start, f):
-                for pat, rep in MUTATIONS:
-                    text = (wt / f).read_text().splitlines(keepends=True)[ln - 1]
-                    if re.search(pat, text) and not text.lstrip().startswith(('#', '//', 'import', 'from ')):
-                        mutants.append((f, ln, pat, rep))
-                        break
+            mutants.extend((f, *m) for m in _mutants_for(wt / f, set(_added_lines(wt, start, f))))
         rng = random.Random(t['id'])
         rng.shuffle(mutants)
         mutants = mutants[:int(self.cfg['oracle_tests'].get('max_mutants', 12))]
         killed, survivors = 0, []
-        for f, ln, pat, rep in mutants:
+        for f, ln, col, end, rep in mutants:
             path = wt / f
             original = path.read_text()
             lines = original.splitlines(keepends=True)
-            lines[ln - 1] = re.sub(pat, rep, lines[ln - 1], count=1)
+            line = lines[ln - 1]
+            lines[ln - 1] = line[:col] + rep + line[end:]
             path.write_text(''.join(lines))
             try:
                 r = checks_mod.run({'oracle': oracle['command']}, wt, timeout=300)[0]
             finally:
                 path.write_text(original)
             if r.ok:
-                survivors.append(f'{f}:{ln}: {lines[ln - 1].strip()[:120]}')
+                survivors.append(f'{f}:{ln}: `{line[col:end]}` -> `{rep}` in: {line.strip()[:100]}')
             else:
                 killed += 1
         git.discard(wt)
@@ -415,3 +413,49 @@ def _syntax_error(wt: Path, f: str) -> str:
         return ''
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return '' if p.returncode == 0 else (p.stderr or p.stdout).strip()[-400:]
+
+
+def _mutants_for(path: Path, added: set[int]) -> list[tuple[int, int, int, str]]:
+    """Mutants (line, col, end_col, replacement) on added lines, only in real code (not strings/comments)."""
+    if not added or not path.exists():
+        return []
+    out: list[tuple[int, int, int, str]] = []
+    if path.suffix == '.py':
+        import io
+        import tokenize
+        seen = set()
+        try:
+            toks = list(tokenize.generate_tokens(io.StringIO(path.read_text()).readline))
+        except (tokenize.TokenError, SyntaxError, IndentationError):
+            return []
+        for tok in toks:
+            ln = tok.start[0]
+            if ln not in added or ln in seen or tok.start[0] != tok.end[0]:
+                continue
+            rep = None
+            if tok.type == tokenize.OP or (tok.type == tokenize.NAME and tok.string in PY_OPS):
+                rep = PY_OPS.get(tok.string)
+            elif tok.type == tokenize.NUMBER and tok.string.isdigit():
+                rep = str(int(tok.string) + 1)
+            if rep is not None:
+                out.append((ln, tok.start[1], tok.end[1], rep))
+                seen.add(ln)                      # one mutant per line keeps runs bounded
+        return out
+    lines = path.read_text().splitlines()
+    for ln in sorted(added):
+        if ln > len(lines):
+            continue
+        text = lines[ln - 1]
+        if text.lstrip().startswith(('//', '#', '*', '/*', 'import ', 'from ')):
+            continue
+        for pat, rep in MUTATIONS:
+            for m in re.finditer(pat, text):
+                prefix = text[:m.start()]
+                if prefix.count('"') % 2 or prefix.count("'") % 2 or prefix.count('`') % 2 or '//' in prefix:
+                    continue                      # inside a string literal or after a comment marker
+                out.append((ln, m.start(), m.end(), rep(m) if callable(rep) else rep))
+                break
+            else:
+                continue
+            break
+    return out

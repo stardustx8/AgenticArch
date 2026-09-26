@@ -24,12 +24,17 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
   -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
+  -> oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests,
+     validated (syntax, must fail on base; one repair round), read-only for workers
+  -> medium_tough (or a Luna task out of retries): Astra and Opus race in parallel worktrees;
+     checks decide, two-vendor judge panel when both pass (split -> smaller diff)
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
      fail -> failure triage per failed check:
        passes on rerun: FLAKY (noted) | SemIf says environment: pause + ntfy Retry/Treat as code/Cancel
        same failure on the base commit: PRE_EXISTING (spec judge told) | else CODE:
        retry same lane with the failure (2x), then escalate lane, then deep case
-  -> pass: spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
+  -> pass: mutation gate (planted bugs in changed code must be caught by the oracle tests)
+  -> spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
      against the diff, read-only in the worktree
        unmet -> back to the same worker with the reasons; worker fixes or answers REBUTTAL:
        after 3 loops -> ntfy: Accept / One more / Cancel

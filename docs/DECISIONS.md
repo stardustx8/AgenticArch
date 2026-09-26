@@ -114,3 +114,12 @@ decides whether the task required fixing it; without the spec check it blocks as
 Environment is asked before the base comparison because a broken environment breaks the base
 commit too. Seen live on 2026-09-26: an auth/infra failure burned four worker attempts before
 this existed.
+
+## D020: oracle tests, mutation gate, cross-vendor best-of-2, added 2026-09-26
+
+Owner chose research ideas 1+2, to trigger reliably by rule (aa/quality.py). Evidence:
+agent-written tests inside the worker loop do not help; independent tests do; cross-vendor
+candidate pools raise the chance a correct fix exists; judges prefer their own family, so the
+pairwise pick uses a two-vendor panel. Live 2026-09-26: first run exposed a syntax-broken oracle
+that escalated to Pro (fixed: validation, repair round, dispute safety net); second run
+t0926-ac228 delivered end to end (both racers passed, both judges picked Astra).
