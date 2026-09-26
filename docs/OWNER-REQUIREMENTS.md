@@ -29,7 +29,7 @@ a day); manual one-line Pro prompts are acceptable.
 | O17 | After the checks pass, Opus 5.5 checks the implementation against every acceptance criterion; mismatches go back to the worker, max 3 loops, then the owner. | aa/tasks.py `_spec_check` |
 | O16 | Git: branch + PR per milestone; SSH auth. Moderate cleanup: compat layers removed, Pi parked, docs trimmed. | this revision |
 | O18 | Speed/quota vs correctness (2026-09-26): accepting one more wrong result in 50 (2 percentage points of correct delivery) is fine if everything runs twice as fast. | HO-01 scoring |
-| O19 | Representative work (2026-09-26): application programming; medium projects such as web apps (not ERP scale); requirements engineering with AI; Power Query, BI, Excel and SQL work. | lab task sets |
+| O19 | Representative work (2026-09-26): end-to-end AI, data and automation engineering on existing, ongoing projects; ambiguous objectives matter most; research-to-implementation is integral. Languages: Python, TypeScript/JavaScript, SQL, shell (high); PowerShell, HTML/CSS (medium); DAX/M and others conditional. Evaluation: existing multi-component repos, repeats and held-out tasks, first and final result, critical failures reported separately; mix ~30% features/refactoring, 20% debugging/reliability, 15% AI/data, 15% infrastructure/cross-platform, 10% research-to-implementation, 10% small fixes/greenfield. Full profile in the private case repository. | lab task sets |
 
 ## Environment (verified 2026-09-25)
 
