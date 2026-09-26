@@ -39,7 +39,7 @@ def receipt(root: Path, task_dir: Path, flags: dict, config: dict) -> dict:
 
 
 def save_records(art: Path, db, calls: list[dict], state: Path, metadata: dict) -> None:
-    """Save before hidden grading, so a grader crash does not erase worker evidence.
+    """Save before temporary state is deleted, even when hidden grading fails.
 
     Contains local paths/task records: keep real-task exports private. Call usage
     is cumulative provider output, not peak context or subscription headroom.
