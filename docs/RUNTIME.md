@@ -6,7 +6,7 @@ Operations manual for the working system (installed on the workstation 2026-09-2
 
 | Unit (systemd --user) | What | Where |
 | --- | --- | --- |
-| `aa-daemon` | Coordinator: tasks, deep cases, owner replies | `bin/aa daemon`, state in `~/.local/share/agenticarch/aa.sqlite` |
+| `aa-daemon` | Coordinator: tasks, deep cases, owner replies; workers and their checks run in its cgroup (MemoryMax 48G, OOMPolicy=continue: a runaway test is killed, not the machine) | `bin/aa daemon`, state in `~/.local/share/agenticarch/aa.sqlite` |
 | `aa-semif` | SemIf decider: Qwen3.5-4B in the `ai-lab/private-semif` container, `--network none`, Unix socket, ~9 GB VRAM | model + source in `~/.local/share/agenticarch/semif/` |
 | `aa-gemma` | Gemma 4 31B (vLLM, FP8, loopback :8100, ~52 GB incl. KV): neutral tie-break judge + extra test writer | `~/.local/share/agenticarch/models/gemma-4-31B-it` (from the archive, sha256-verified) |
 | `aa-clm-embed`, `aa-clm` | CLM (vLLM Qwen3-8B + clm-serve), loopback; **disabled** since D016, re-enable with `decider.backend = "clm"` | venv `~/.local/share/agenticarch/clm-venv` |
