@@ -33,8 +33,10 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> met: squash to one commit, push branch, ntfy "Done"
 ```
 
-The coordinator, never a model, commits, runs checks and decides pass/fail. Workers
-never get API keys (scrubbed env + auth-mode check before every dispatch); Claude's
+The coordinator, never a model, commits, runs checks and decides pass/fail. Claude
+workers run in auto mode with hard denies (no push, no remotes, no sudo/ssh, credential
+files unreadable, no MCP connectors); Codex workers in Codex's workspace-write sandbox.
+Workers never get API keys (scrubbed env + auth-mode check before every dispatch); Claude's
 `modelUsage` must show the requested model or the job fails.
 
 ## Deep case flow

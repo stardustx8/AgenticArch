@@ -31,6 +31,7 @@ max_pro_reviews = 2       # CLARIFY reviews before the case pauses for the owner
 challengers = ["opus_high", "astra_high"]
 
 [workers]
+claude_guard = "auto"      # auto | sandbox (needs nested userns) | acceptEdits
 max_parallel = 3
 timeout_s = 3600
 

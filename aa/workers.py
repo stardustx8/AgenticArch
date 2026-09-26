@@ -76,10 +76,15 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 class Workers:
     def __init__(self, cfg: Config, runner: Runner = subprocess.run):
-        # Claude workers: OS sandbox (bubblewrap + socat) and the auto-mode safety classifier
-        # instead of unrestricted acceptEdits Bash. Codex workers already run in Codex's
-        # workspace-write sandbox.
-        self.claude_sandbox = bool(cfg['workers'].get('claude_sandbox', False))
+        # Claude worker guard: 'auto' = Claude's auto-mode safety classifier reviews every action
+        # (default; the OS sandbox cannot nest under Ubuntu's AppArmor userns restriction here),
+        # 'sandbox' = auto mode + OS sandbox (needs nested user namespaces), 'acceptEdits' = legacy.
+        # Codex workers already run in Codex's workspace-write sandbox.
+        self.claude_guard = cfg['workers'].get('claude_guard', 'auto')
+        if cfg['workers'].get('claude_sandbox'):
+            self.claude_guard = 'sandbox'
+        if self.claude_guard not in ('auto', 'sandbox', 'acceptEdits'):
+            raise ValueError(f'unknown workers.claude_guard {self.claude_guard!r}')
         self.codex = str(cfg.path('workers', 'codex'))
         self.claude = str(cfg.path('workers', 'claude'))
         self.timeout = int(cfg['workers']['timeout_s'])
@@ -172,9 +177,12 @@ class Workers:
         # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.
         cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
                '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config']
-        if write and self.claude_sandbox:
+        if write and self.claude_guard == 'sandbox':
             cmd += ['--permission-mode', 'auto', '--settings', json.dumps(sandbox_settings(cwd, extra_dirs)),
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
+        elif write and self.claude_guard == 'auto':
+            cmd += ['--permission-mode', 'auto', '--settings', json.dumps({'permissions': {'deny': WORKER_DENY}}),
+                    '--allowedTools', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
         elif write:
             cmd += ['--permission-mode', 'acceptEdits',
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
@@ -217,10 +225,17 @@ class Workers:
         return Result(not err, text, structured, seen, usage, error=err)
 
 
+# Hard denies for Claude workers, independent of the auto-mode classifier (which honours
+# explicitly requested actions): workers never publish, change remotes or escalate privileges.
+WORKER_DENY = ['Bash(git push:*)', 'Bash(git remote:*)', 'Bash(git config:*)', 'Bash(sudo:*)',
+               'Bash(ssh:*)', 'Bash(scp:*)', 'Bash(gh:*)', 'Read(~/.ssh/**)', 'Read(~/.codex/auth.json)',
+               'Read(~/.claude/.credentials.json)', 'Read(~/.config/agenticarch/**)']
+
+
 def sandbox_settings(cwd: Path, extra_dirs: tuple[Path, ...] = ()) -> dict:
     """Claude Code sandbox: writes only in the job directories, credentials unreadable,
     refuse to start without a working sandbox (never silently unsandboxed)."""
-    return {'sandbox': {
+    return {'permissions': {'deny': WORKER_DENY}, 'sandbox': {
         'enabled': True, 'allowUnsandboxedCommands': False, 'failIfUnavailable': True,
         'filesystem': {'allowWrite': [str(cwd), *map(str, extra_dirs)],
                        'denyRead': ['~/.ssh', '~/.codex/auth.json', '~/.claude/.credentials.json',

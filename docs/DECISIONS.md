@@ -93,3 +93,14 @@ and high 40/40 with none (caveat: Opus also generated the set). Owner decision: 
 judges every acceptance criterion and test tampering after the checks pass; unmet goes back
 to the worker (which may rebut); max 3 loops, then the owner. Default effort medium.
 Spec loops have their own budget and do not trigger lane escalation.
+
+## D018: Claude worker guard = auto mode + hard denies, added 2026-09-26
+
+Claude Code's OS sandbox needs nested user namespaces, which Ubuntu's AppArmor
+bwrap-userns-restrict profile blocks (a claude-cli AppArmor profile did not help; the
+restriction applies to bwrap's children). Owner chose not to loosen it system-wide.
+Claude workers run with --permission-mode auto (classifier reviews every action; Bash is
+not pre-approved) plus hard permission denies (git push/remote/config, sudo, ssh/scp, gh,
+credential files) and --strict-mcp-config. `workers.claude_guard = "sandbox"` remains for
+hosts that allow nesting. Verified live: normal work runs; an explicitly requested force
+push was allowed by the classifier alone, hence the deterministic deny list.

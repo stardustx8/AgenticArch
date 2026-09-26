@@ -737,6 +737,21 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(settings['filesystem']['allowWrite'], [tmp])
         self.assertIn('~/.ssh', settings['filesystem']['denyRead'])
 
+    def test_claude_default_guard_is_auto_mode_without_blanket_bash(self):
+        out = json.dumps({'result': 'ok', 'is_error': False, 'modelUsage': {'claude-opus-5-5': {}}})
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, out, ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(self.cfg(tmp), runner=runner)
+            w.verify_billing = lambda cli: None
+            self.assertTrue(w.execute(LANES['opus_high'], 'p', Path(tmp)).ok)
+        cmd = runner.call_args[0][0]
+        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'auto')
+        allowed = cmd[cmd.index('--allowedTools') + 1:]
+        self.assertNotIn('Bash', allowed, 'Bash goes through the auto-mode classifier, not a blanket allow')
+        deny = json.loads(cmd[cmd.index('--settings') + 1])['permissions']['deny']
+        self.assertIn('Bash(git push:*)', deny)
+        self.assertIn('Read(~/.ssh/**)', deny)
+
     def test_missing_sandbox_blocks_instead_of_running_unsandboxed(self):
         from aa.workers import BillingError
         runner = mock.Mock(return_value=subprocess.CompletedProcess(
