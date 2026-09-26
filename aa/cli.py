@@ -4,7 +4,7 @@
   aa status [-a]                                    active tasks/cases (-a: all)
   aa show ID                                        details, recent events
   aa prompt CASE                                    the current one-line Pro prompt
-  aa answer "tier <task> <tier>" | "checks <task> ok|none" | "answer <case> <text>"
+  aa answer "tier <task> <tier>" | "checks <task> ok|none" | "answer <case|task> <text>"
             | "resume <case>" | "cancel <id>" | "retry <task>" | "accept <task>" | "code <task>"
   aa doctor                                         verify subscriptions, CLM, ntfy, git
   aa daemon                                         run the coordinator (systemd does this)

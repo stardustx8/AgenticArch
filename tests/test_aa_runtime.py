@@ -97,7 +97,7 @@ def _kind(log_name: str) -> str:
 
 def triage(tier, cats=(), peer='astra'):
     return {'tier': tier, 'peer': peer, 'pro_categories': list(cats), 'summary': 's',
-            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': []}
+            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': [], 'owner_question': ''}
 
 
 class Env:
@@ -514,7 +514,99 @@ class LocalFlowTests(unittest.TestCase):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': blocked}, FakeCLM('routine'))
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'BLOCKED')
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'WAIT_OWNER')                   # legacy text marker still understood
+        self.assertEqual(t['data']['worker_question'], 'need API docs')
+
+    def test_structured_blocked_question_then_owner_answer(self):
+        prompts = []
+
+        def work(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return Result(True, '{}', {'status': 'blocked', 'summary': 'stopped', 'open_items': [],
+                                           'question': 'CSV or JSON export?', 'rebuttals': []}, [lane.model])
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, '{}', {'status': 'done', 'summary': 'did CSV', 'open_items': [],
+                                       'question': '', 'rebuttals': []}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'export')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'WAIT_OWNER')
+        title, msg, kw = self.env.sent[-1]
+        self.assertIn('Question from worker', title)
+        self.assertIn('CSV or JSON export?', msg)
+        self.env.db.inbox_put(f'answer {tid} CSV please')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['passes']), ('DONE', 1), 'owner answers do not consume retries')
+        self.assertIn('A: CSV please', prompts[1])
+
+    def test_triage_owner_question_asked_before_dispatch(self):
+        triage_prompts = []
+        first = dict(triage('tough', ['research']), owner_question='Which exchange rate should be used?')
+        second = triage('routine')
+
+        class W(FakeWorkers):
+            def execute(s, lane, prompt, cwd, **kw):
+                if kw.get('log_name', '').endswith('-triage'):
+                    triage_prompts.append(prompt)
+                    s.calls.append((lane.name, kw['log_name']))
+                    return Result(True, '', first if len(triage_prompts) == 1 else second, [lane.model])
+                return super().execute(lane, prompt, cwd, **kw)
+        self.env = Env(self.tmp, {'triage': None, 'work': write_done}, FakeCLM('routine'))
+        self.env.app.tasks.workers = W(self.env.cfg, {'work': write_done})
+        tid = self.env.app.tasks.create(self.env.target, 'convert usd')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['case_id']), ('WAIT_OWNER', None), 'asked, not routed to Pro')
+        self.assertIn('Which exchange rate', self.env.sent[-1][1])
+        self.env.db.inbox_put(f'answer {tid} 0.92 EUR per USD, fixed')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['tier']), ('DONE', 'routine'))
+        self.assertIn('A: 0.92 EUR per USD', triage_prompts[1])
+
+    def test_partial_status_goes_back_without_running_checks(self):
+        prompts = []
+
+        def work(lane, cwd, prompt, extra):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return Result(True, '{}', {'status': 'partial', 'summary': 'backend only', 'open_items': ['UI part'],
+                                           'question': '', 'rebuttals': []}, [lane.model])
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, '{}', {'status': 'done', 'summary': 'all', 'open_items': [], 'question': '',
+                                       'rebuttals': []}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertIn('Still required:\n- UI part', prompts[1])
+        kinds = [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE task_id=?', (tid,))]
+        self.assertIn('worker_partial', kinds)
+        self.assertNotIn('failure_triage', kinds, 'checks were not run on known-partial work')
+
+    def test_rebuttals_field_reaches_spec_judge(self):
+        judged = []
+        verdicts = [spec_verdict(['b']), spec_verdict([])]
+
+        def judge(lane, cwd, prompt, extra):
+            judged.append(prompt)
+            return Result(True, '', verdicts.pop(0), [lane.model])
+
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            reb = ['b is satisfied in app.py:1'] if 'reviewer' in prompt else []
+            return Result(True, '{}', {'status': 'done', 'summary': 's', 'open_items': [], 'question': '',
+                                       'rebuttals': reb}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work, 'spec': judge}, FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertIn('b is satisfied in app.py:1', judged[1])
 
     def test_crash_recovery_clears_busy_flags(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))

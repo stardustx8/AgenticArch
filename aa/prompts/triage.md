@@ -18,6 +18,12 @@ peer: the better model if this were medium-tough work: astra (backend, systems,
 algorithms, data, infrastructure, debugging) or opus (frontend, UI/UX, visual, product, writing).
 pro_categories: list any that apply among architecture, research, security_design,
 migration_design, irreversible_change_design (any entry forces the tough tier).
+"research" means an open technical question that needs investigation; it does NOT mean a
+missing fact that only the owner knows.
+owner_question: if the task cannot be done correctly without a fact, value, access or
+decision that only the owner can provide (and that is not in the repository), ask for it here
+precisely, with options when useful; judge the tier as if the answer were given. Otherwise "".
+$owner_answers
 acceptance_criteria: concrete, checkable statements of done.
 relevant_paths: up to 15 existing repo paths most relevant to the task.
 summary: two or three sentences a senior engineer would need to start.

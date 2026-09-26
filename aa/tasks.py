@@ -40,8 +40,10 @@ MEDIUM_PEERS = tuple(PEER_LANES.values())      # model-only choice: astra_high |
 
 TRIAGE_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['tier', 'peer', 'pro_categories', 'summary', 'acceptance_criteria', 'relevant_paths', 'risks'],
+    'required': ['tier', 'peer', 'pro_categories', 'summary', 'acceptance_criteria', 'relevant_paths', 'risks',
+                 'owner_question'],
     'properties': {
+        'owner_question': {'type': 'string'},
         'tier': {'type': 'string', 'enum': TIER_ORDER},
         'peer': {'type': 'string', 'enum': sorted(PEER_LANES)},
         'pro_categories': {'type': 'array', 'items': {'type': 'string', 'enum': sorted(PRO_CATEGORIES)}},
@@ -53,6 +55,18 @@ TRIAGE_SCHEMA = {
 }
 
 ACTIVE = ('NEW', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
+
+WORKER_SCHEMA = {
+    'type': 'object', 'additionalProperties': False,
+    'required': ['status', 'summary', 'open_items', 'question', 'rebuttals'],
+    'properties': {
+        'status': {'type': 'string', 'enum': ['done', 'partial', 'blocked']},
+        'summary': {'type': 'string'},
+        'open_items': {'type': 'array', 'items': {'type': 'string'}},
+        'question': {'type': 'string'},
+        'rebuttals': {'type': 'array', 'items': {'type': 'string'}},
+    },
+}
 
 SPEC_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -66,6 +80,22 @@ SPEC_SCHEMA = {
         'tampering_reason': {'type': 'string'},
     },
 }
+
+
+def worker_report(res) -> dict:
+    """Structured worker status; falls back to the legacy text markers when absent."""
+    s = res.structured if isinstance(res.structured, dict) else None
+    if s and s.get('status') in ('done', 'partial', 'blocked'):
+        return {'status': s['status'], 'summary': str(s.get('summary', '')),
+                'open_items': [str(x) for x in s.get('open_items') or []],
+                'question': str(s.get('question', '')), 'rebuttals': [str(x) for x in s.get('rebuttals') or []],
+                'from_schema': True}
+    lines = res.text.splitlines()
+    blocked = next((ln for ln in lines if ln.startswith('BLOCKED:')), None)
+    return {'status': 'blocked' if blocked else 'done', 'summary': res.text,
+            'open_items': [], 'question': blocked[len('BLOCKED:'):].strip() if blocked else '',
+            'rebuttals': [ln.strip() for ln in lines if ln.strip().startswith('REBUTTAL:')],
+            'from_schema': False}
 
 
 def render(name: str, **values: object) -> str:
@@ -102,7 +132,7 @@ class TaskFlow:
     def _triage(self, t: dict) -> None:
         repo = Path(t['repo'])
         data = t['data']
-        prompt = render('triage.md', repo=repo, prompt=t['prompt'],
+        prompt = render('triage.md', repo=repo, prompt=t['prompt'], owner_answers=self._answers_text(t),
                         **{f'tier_{k}': v for k, v in TIERS.items()})
         try:
             res = self.workers.execute(LANES['luna_high'] if self.cfg['triage']['effort'] == 'high'
@@ -119,6 +149,12 @@ class TaskFlow:
         else:
             triage = res.structured
         data['triage'] = triage
+        if (triage.get('owner_question') or '').strip():
+            # Missing owner facts are asked before anyone is dispatched (not routed to Pro).
+            data['question_stage'] = 'triage'
+            self.db.update_task(t['id'], data=data)
+            self._ask_owner(t, triage['owner_question'].strip())
+            return
         codex_tier = triage.get('tier')
         if triage.get('pro_categories'):
             codex_tier = 'tough'
@@ -276,42 +312,77 @@ class TaskFlow:
         prev = t['data'].get('last_failure')
         previous = (f'\nA previous attempt left the worktree as it is now. Feedback on it '
                     f'(address it; keep what works):\n{prev}\n') if prev else ''
+        owner_answers = self._answers_text(t)
         prompt = render('worker.md', worktree=wt, branch=t['branch'] or f'aa/{t["id"]}',
                         prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
                         paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
                         checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()],
                                       '- (none configured)'),
-                        previous=previous)
+                        previous=previous, owner_answers=owner_answers)
         try:
-            res = self.workers.execute(lane, prompt, wt, log_name=t['id'])
+            res = self.workers.execute(lane, prompt, wt, schema=WORKER_SCHEMA, log_name=t['id'])
         except BillingError as exc:
             self.db.update_task(t['id'], status='BLOCKED', result=f'billing: {exc}')
             self.n.send(f'Blocked {t["id"]}', f'Subscription check failed: {exc}', tags='warning')
             return
-        spec_rerun = t['data'].pop('spec_rerun', False)       # spec loops have their own budget
-        passes = t['passes'] + (0 if spec_rerun else 1)
-        lane_passes = t['lane_passes'] + (0 if spec_rerun else 1)
+        report = worker_report(res)
+        free_rerun = t['data'].pop('spec_rerun', False) or t['data'].pop('answer_rerun', False)
+        passes = t['passes'] + (0 if free_rerun else 1)         # spec loops / owner answers: own budget
+        lane_passes = t['lane_passes'] + (0 if free_rerun else 1)
         t['data'].setdefault('attempts', []).append(
             {'lane': lane.name, 'ok': res.ok, 'seconds': round(res.seconds), 'usage': res.usage,
-             'error': res.error[:500], 'summary': res.text[-1500:]})
+             'error': res.error[:500], 'status': report['status'], 'summary': report['summary'][-1500:]})
+        if report['rebuttals']:
+            t['data']['rebuttals'] = report['rebuttals'][:10]
         self.db.update_task(t['id'], passes=passes, lane_passes=lane_passes, data=t['data'])
-        rebuttals = [ln for ln in res.text.splitlines() if ln.strip().startswith('REBUTTAL:')]
-        if rebuttals:
-            t['data']['rebuttals'] = rebuttals[:10]
-            self.db.update_task(t['id'], data=t['data'])
-        blocked = next((ln for ln in res.text.splitlines() if ln.startswith('BLOCKED:')), None)
-        if blocked:
-            self.db.update_task(t['id'], status='BLOCKED', result=blocked)
-            self.n.send(f'Blocked {t["id"]}', blocked[:1000], tags='warning')
+        if report['status'] == 'blocked':
+            self._ask_owner(t, report['question'] or report['summary'])
             return
-        if not res.ok:
+        if not res.ok and not report['from_schema']:
             t = self.db.task(t['id'])
             t['data']['last_failure'] = f'worker error: {res.error[:1500]}'
+            self._retry_or_escalate(t)
+            return
+        if report['status'] == 'partial':
+            # No point running checks on known-incomplete work: send it straight back.
+            t = self.db.task(t['id'])
+            t['data']['last_failure'] = ('You reported the task as partial. Still required:\n' +
+                                         bullet(report['open_items'], '- (see your summary)'))
+            self.db.event('worker_partial', t['id'], open_items=report['open_items'][:10])
             self._retry_or_escalate(t)
             return
         # Snapshot the worker's changes so check artefacts (caches, builds) never get committed.
         git.commit_all(wt, f'aa wip {t["id"]} pass {passes} ({lane.name})')
         self.db.update_task(t['id'], status='VERIFY')
+
+    # ------------------------------------------------------- owner questions
+    def _ask_owner(self, t: dict, question: str) -> None:
+        t = self.db.task(t['id'])
+        t['data']['worker_question'] = question
+        self.db.update_task(t['id'], status='WAIT_OWNER', data=t['data'])
+        self.db.event('worker_blocked', t['id'], question=question[:500])
+        self.n.send(f'Question from worker: {t["id"]}',
+                    f'{t["prompt"][:160]}\n\n{question[:2500]}\n\nAnswer: publish "answer {t["id"]} <your answer>" '
+                    f'to topic {self.n.reply_topic} in ntfy, or on the workstation: '
+                    f'aa answer "answer {t["id"]} <your answer>"',
+                    choices=[('Cancel', f'cancel {t["id"]}')], priority=4, tags='question')
+
+    @staticmethod
+    def _answers_text(t: dict) -> str:
+        answers = t['data'].get('owner_answers') or []
+        return ('\nThe owner answered these questions (treat as facts):\n' +
+                '\n'.join(f'- Q: {a["q"]}\n  A: {a["a"]}' for a in answers) + '\n') if answers else ''
+
+    def answer_worker(self, tid: str, text: str) -> None:
+        t = self.db.task(tid)
+        if not t or t['status'] != 'WAIT_OWNER' or not t['data'].get('worker_question'):
+            raise ValueError('task is not waiting on a question')
+        t['data'].setdefault('owner_answers', []).append({'q': t['data'].pop('worker_question'), 'a': text.strip()})
+        if t['data'].pop('question_stage', None) == 'triage':
+            self.db.update_task(tid, status='NEW', data=t['data'])      # re-triage with the answer
+            return
+        t['data']['answer_rerun'] = True
+        self.db.update_task(tid, status='READY', data=t['data'])
 
     def _verify(self, t: dict) -> None:
         wt = Path(t['worktree'])
@@ -480,7 +551,7 @@ class TaskFlow:
             f'An independent reviewer (spec loop {t["data"]["spec_loops"]}) found the implementation does '
             f'not yet meet the specification. The checks pass; do not weaken them.\n{feedback}\n'
             'Fix these points. If you are sure a point is already satisfied, do not change code for it; '
-            'instead add a line starting with `REBUTTAL:` that cites the file and lines that satisfy it.')
+            'instead add an entry to `rebuttals` citing the file and lines that satisfy it.')
         self.db.event('spec_send_back', t['id'], loop=t['data']['spec_loops'])
         self.db.update_task(t['id'], status='READY', data=t['data'])
 

@@ -53,6 +53,8 @@ class App:
                 self.tasks.set_tier(ident, rest.strip())
             elif verb == 'checks':
                 self.tasks.confirm_checks(ident, rest.strip() or 'ok')
+            elif verb == 'answer' and self.db.task(ident):
+                self.tasks.answer_worker(ident, rest)
             elif verb == 'answer':
                 self.cases.answer(ident, rest)
             elif verb == 'resume':
