@@ -17,6 +17,7 @@ from .config import Config
 from .db import DB
 from .notify import Notifier
 from .decisions import PEER_LANES, peer_question, tier_question
+from .quality import QualityMixin, cleanup_quality_worktrees
 from .workers import LANES, BillingError, Workers
 
 PROMPTS = Path(__file__).parent / 'prompts'
@@ -41,8 +42,9 @@ MEDIUM_PEERS = tuple(PEER_LANES.values())      # model-only choice: astra_high |
 TRIAGE_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'required': ['tier', 'peer', 'pro_categories', 'summary', 'acceptance_criteria', 'relevant_paths', 'risks',
-                 'owner_question'],
+                 'owner_question', 'testable'],
     'properties': {
+        'testable': {'type': 'boolean'},
         'owner_question': {'type': 'string'},
         'tier': {'type': 'string', 'enum': TIER_ORDER},
         'peer': {'type': 'string', 'enum': sorted(PEER_LANES)},
@@ -54,7 +56,7 @@ TRIAGE_SCHEMA = {
     },
 }
 
-ACTIVE = ('NEW', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
+ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'RACE', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
 
 WORKER_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -107,7 +109,7 @@ def bullet(items: list[str] | None, empty: str = '- (none given)') -> str:
     return '\n'.join(f'- {x}' for x in items) if items else empty
 
 
-class TaskFlow:
+class TaskFlow(QualityMixin):
     def __init__(self, cfg: Config, db: DB, workers: Workers, decider, notifier: Notifier):
         # decider: aa.semif.SemIf (default) or aa.clm.CLM — same choose/rank interface.
         self.cfg, self.db, self.workers, self.decider, self.n = cfg, db, workers, decider, notifier
@@ -122,7 +124,8 @@ class TaskFlow:
         return tid
 
     def step(self, t: dict) -> None:
-        handler = {'NEW': self._triage, 'TRIAGED': self._route, 'READY': self._work,
+        handler = {'NEW': self._triage, 'TRIAGED': self._route, 'ORACLE': self._oracle, 'RACE': self._race,
+                   'READY': self._work,
                    'VERIFY': self._verify, 'SPEC': self._spec_check,
                    'DELIVER': self._deliver}.get(t['status'])
         if handler:
@@ -217,7 +220,7 @@ class TaskFlow:
             self._to_deep(t, 'tier tough')
             return
         lane = TIER_LANE.get(t['tier']) or self._choose_peer(t, exclude=())
-        self._start_lane(t, lane)
+        self._plan_quality(t, lane)          # oracle tests / best-of-2 triggers, then the lane
 
     def _backend(self) -> str:
         return getattr(self.decider, 'backend', 'clm')
@@ -300,7 +303,7 @@ class TaskFlow:
     def _worktree(self, t: dict) -> Path:
         wt = self.cfg.worktrees / t['id']
         branch = t['branch'] or f'aa/{t["id"]}'
-        git.add_worktree(Path(t['repo']), wt, branch, t['base_ref'])
+        git.add_worktree(Path(t['repo']), wt, branch, self._start_commit(t))
         if t['worktree'] != str(wt) or t['branch'] != branch:
             self.db.update_task(t['id'], worktree=str(wt), branch=branch)
         return wt
@@ -310,8 +313,8 @@ class TaskFlow:
         wt = self._worktree(t)
         tri = t['data'].get('triage') or {}
         prev = t['data'].get('last_failure')
-        previous = (f'\nA previous attempt left the worktree as it is now. Feedback on it '
-                    f'(address it; keep what works):\n{prev}\n') if prev else ''
+        previous = self._oracle_worker_note(t) + ((f'\nA previous attempt left the worktree as it is now. '
+                    f'Feedback on it (address it; keep what works):\n{prev}\n') if prev else '')
         owner_answers = self._answers_text(t)
         prompt = render('worker.md', worktree=wt, branch=t['branch'] or f'aa/{t["id"]}',
                         prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
@@ -351,6 +354,8 @@ class TaskFlow:
             self.db.event('worker_partial', t['id'], open_items=report['open_items'][:10])
             self._retry_or_escalate(t)
             return
+        self._protect_oracle(t, wt)          # independent tests are read-only for workers
+        self.db.update_task(t['id'], data=t['data'])
         # Snapshot the worker's changes so check artefacts (caches, builds) never get committed.
         git.commit_all(wt, f'aa wip {t["id"]} pass {passes} ({lane.name})')
         self.db.update_task(t['id'], status='VERIFY')
@@ -395,7 +400,11 @@ class TaskFlow:
             if failed is None:               # paused for the owner (environment problem)
                 return
         if not failed:
+            self.db.update_task(t['id'], data=t['data'])     # persist check notes before the gate reloads
+            self._mutation_gate(t, wt)
+            t = self.db.task(t['id'])
             self.db.decision_outcome(t['id'], 'tier', 'pass')
+            self.db.decision_outcome(t['id'], 'best_of_2', 'pass')
             self.db.decision_outcome(t['id'], 'peer', 'pass')
             if self.cfg['spec_check'].get('enabled', True):
                 self.db.update_task(t['id'], status='SPEC', data=t['data'])
@@ -483,6 +492,12 @@ class TaskFlow:
         tried = tuple(t['data'].get('lanes_tried', []))
         if t['lane'] == 'luna_low':
             nxt = 'luna_high'
+        elif t['lane'] == 'luna_high' and self.cfg['best_of_2'].get('on_escalation', True) \
+                and self.cfg['best_of_2'].get('enabled', True):
+            self.db.event('escalate', t['id'], frm=t['lane'], to='best_of_2')
+            t['data']['mode'] = 'race'
+            self.db.update_task(t['id'], data=t['data'], status='RACE')
+            return
         elif t['lane'] == 'luna_high':
             nxt = self._choose_peer(t, exclude=tried)
         else:
@@ -510,7 +525,7 @@ class TaskFlow:
         prompt = render('spec_judge.md', worktree=wt, prompt=t['prompt'], base=t['base_ref'][:12],
                         criteria='\n'.join(f'{i + 1}. {c}' for i, c in enumerate(criteria)), diff=diff,
                         rebuttals=(('\nThe worker rebutted earlier findings:\n' + '\n'.join(rebuttals) + '\n')
-                                   if rebuttals else '') + check_note)
+                                   if rebuttals else '') + check_note + self._quality_note_for_judge(t))
         res = self.workers.execute(LANES[sc['lane']], prompt, wt, write=False, schema=SPEC_SCHEMA,
                                    log_name=f'{t["id"]}-spec')
         if not res.ok or not res.structured:
@@ -598,6 +613,7 @@ class TaskFlow:
         self.db.update_task(t['id'], status='DONE', result=result, data=t['data'])
         git.remove_worktree(Path(t['repo']), wt)
         git.remove_worktree(Path(t['repo']), self.cfg.state_dir / 'base-wt' / t['id'])
+        cleanup_quality_worktrees(self.cfg, t)
         self.n.send(f'Done {t["id"]} ({t["lane"]})',
                     f'{title}\n{result}\n{t["data"].get("checks_result", "")}\n{spec_note}\n{stat[-800:]}',
                     tags='white_check_mark')

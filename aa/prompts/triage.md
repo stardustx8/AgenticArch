@@ -27,3 +27,5 @@ $owner_answers
 acceptance_criteria: concrete, checkable statements of done.
 relevant_paths: up to 15 existing repo paths most relevant to the task.
 summary: two or three sentences a senior engineer would need to start.
+testable: true if the task changes observable behaviour that automated tests can verify
+(false for pure documentation, formatting, configuration or dependency bumps).

@@ -89,20 +89,37 @@ def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
 def _kind(log_name: str) -> str:
     if log_name.endswith('-spec'):
         return 'spec'
+    if log_name.endswith('-oracle'):
+        return 'oracle'
+    if '-pick-' in log_name:
+        return 'pick'
+    if '-race-' in log_name:
+        return 'work'
     for k in ('-fix', '-opus', '-astra'):
         if k in log_name:
             return k.strip('-')
     return 'work'
 
 
-def triage(tier, cats=(), peer='astra'):
+def triage(tier, cats=(), peer='astra', testable=False):
     return {'tier': tier, 'peer': peer, 'pro_categories': list(cats), 'summary': 's',
-            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': [], 'owner_question': ''}
+            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': [], 'owner_question': '',
+            'testable': testable}
+
+
+def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'):
+    def fn(lane, cwd, prompt, extra):
+        (cwd / 'tests').mkdir(exist_ok=True)
+        (cwd / 'tests' / 'check_feature.sh').write_text(body)
+        (cwd / 'app.py').write_text('print("oracle must not touch production code")\n')
+        return Result(True, '{}', {'test_files': ['tests/check_feature.sh'], 'command': command, 'notes': ''},
+                      [lane.model])
+    return fn
 
 
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True):
+                 triage=True, oracle=False, best_of_2=False):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -122,6 +139,8 @@ class Env:
             'delivery': {'push_branch': True},
             'triage': {'policy': policy},
             'failure_triage': {'enabled': triage},
+            'oracle_tests': {'enabled': oracle},
+            'best_of_2': {'enabled': best_of_2},
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -972,3 +991,154 @@ class FailureTriageTests(unittest.TestCase):
         self.assertEqual(self._run('echo "connection refused"; exit 1', decider_pick='environment').action,
                          'ENVIRONMENT')
         self.assertEqual(self._run('echo "AssertionError"; exit 1', decider_pick='code').action, 'CODE')
+
+
+class QualityTests(unittest.TestCase):
+    """Oracle tests, mutation gate and best-of-2 (aa/quality.py) through the real task flow."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        self.env.close()
+        self._tmp.cleanup()
+
+    def events(self, tid):
+        return [(r['kind'], json.loads(r['detail'])) for r in
+                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
+
+    def test_oracle_tests_by_other_vendor_become_required_and_ship(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done,
+                                  'oracle': oracle_writer()}, FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        oracle_calls = [c for c in self.env.workers.calls if c[1].endswith('-oracle')]
+        self.assertEqual(oracle_calls[0][0], 'opus_medium', 'Luna implements -> Anthropic writes the tests')
+        self.assertIn('oracle_tests', t['data']['checks'])
+        shipped = sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh')
+        self.assertIn('test -f done.txt', shipped)
+        self.assertEqual(sh(self.env.target, 'git', 'show', f'aa/{tid}:app.py'), 'print(1)',
+                         'oracle author cannot change production code')
+        self.assertFalse((self.env.cfg.worktrees / f'{tid}-oracle').exists())
+
+    def test_oracle_rejected_when_it_passes_on_base(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done,
+                                  'oracle': oracle_writer(body='true\n')}, FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertNotIn('oracle_tests', t['data']['checks'])
+        self.assertIn(('oracle_rejected', {'reason': 'tests already pass on the base commit'}), self.events(tid))
+
+    def test_untestable_task_gets_no_oracle(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=False), 'work': write_done},
+                       FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'docs')
+        self.env.run()
+        self.assertFalse([c for c in self.env.workers.calls if c[1].endswith('-oracle')])
+
+    def test_worker_edits_to_oracle_are_reverted_and_reported(self):
+        judged = []
+
+        def cheat(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            (cwd / 'tests' / 'check_feature.sh').write_text('true\n')
+            return Result(True, 'done', None, [lane.model])
+
+        def judge(lane, cwd, prompt, extra):
+            judged.append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': cheat, 'spec': judge,
+                                  'oracle': oracle_writer()}, FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        self.assertIn('oracle_tamper', [k for k, _ in self.events(tid)])
+        self.assertIn('modified the independent acceptance tests', judged[0])
+        self.assertIn('test -f done.txt', sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh'))
+
+    def test_mutation_gate_flags_weak_oracle_to_judge(self):
+        judged = []
+
+        def impl(lane, cwd, prompt, extra):
+            (cwd / 'calc2.py').write_text('def f():\n    return 3 - 1\n')
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+
+        def judge(lane, cwd, prompt, extra):
+            judged.append(prompt)
+            return Result(True, '', spec_verdict([]), [lane.model])
+        weak = oracle_writer(body='python3 -c "import calc2; assert calc2.f() > 0"\n')
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': impl, 'spec': judge,
+                                  'oracle': weak}, FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        m = self.env.db.task(tid)['data']['mutation']
+        self.assertEqual((m['killed'], m['total']), (0, 1))
+        self.assertIn('independent acceptance tests are weak', judged[0])
+
+    def _race_env(self, work, pick=None, tier='medium_tough'):
+        script = {'triage': triage(tier), 'work': work}
+        if pick:
+            script['pick'] = pick
+        self.env = Env(self.tmp, script, FakeCLM(tier, peer='astra'), best_of_2=True)
+        return self.env.app.tasks.create(self.env.target, 'medium task')
+
+    def test_race_checks_decide_winner(self):
+        def work(lane, cwd, prompt, extra):
+            if lane.name == 'astra_high':
+                (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+        tid = self._race_env(work)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['lane']), ('DONE', 'astra_high'))
+        self.assertEqual(sorted(c[0] for c in self.env.workers.calls if '-race-' in c[1]),
+                         ['astra_high', 'opus_high'])
+        self.assertFalse((self.env.cfg.worktrees / f'{tid}-opus_high').exists())
+        self.assertIn(f'aa/{tid}', sh(self.env.target_origin, 'git', 'branch', '--list'))
+        row = self.env.db.q("SELECT final FROM decisions WHERE kind='best_of_2' AND task_id=?", (tid,))[0]
+        self.assertEqual(row['final'], 'astra_high')
+
+    def _both_pass(self, lane, cwd, prompt, extra):
+        (cwd / 'done.txt').write_text(f'implemented by {lane.name}' + (' with extra care' * 5 if 'opus' in lane.name else ''))
+        return Result(True, 'done', None, [lane.model])
+
+    def test_race_judges_agree(self):
+        def pick(lane, cwd, prompt, extra):
+            a_is_opus = prompt.index('opus_high') < prompt.index('astra_high')
+            return Result(True, '', {'winner': 'A' if a_is_opus else 'B', 'reason': 'opus better'}, [lane.model])
+        tid = self._race_env(self._both_pass, pick)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['lane'], 'opus_high')
+        self.assertEqual(set(t['data']['pick_votes'].values()), {'opus_high'})
+
+    def test_race_judges_split_uses_tiebreak(self):
+        def pick(lane, cwd, prompt, extra):          # each judge prefers its own vendor
+            mine = 'opus_high' if 'opus' in lane.name else 'astra_high'
+            a_is_mine = prompt.index(mine) < prompt.index('astra_high' if mine == 'opus_high' else 'opus_high')
+            return Result(True, '', {'winner': 'A' if a_is_mine else 'B', 'reason': 'mine'}, [lane.model])
+        tid = self._race_env(self._both_pass, pick)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['lane'], 'astra_high', 'split -> smaller diff wins')
+        self.assertIn('judges split', t['data']['race_winner']['reason'])
+
+    def test_luna_failure_escalates_to_race(self):
+        def work(lane, cwd, prompt, extra):
+            if lane.name == 'opus_high':
+                (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work}, FakeCLM('bounded'),
+                       best_of_2=True, triage=False)
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['lane']), ('DONE', 'opus_high'))
+        lanes = [c[0] for c in self.env.workers.calls if not c[1].endswith(('-triage', '-spec'))]
+        self.assertEqual(lanes[:2], ['luna_high', 'luna_high'])
+        self.assertIn(('escalate', {'frm': 'luna_high', 'to': 'best_of_2'}), self.events(tid))

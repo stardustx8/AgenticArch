@@ -75,6 +75,22 @@ DEFAULTS: dict[str, Any] = {
         'poll_s': 60,
         'challengers': ['opus_high', 'astra_high'],
     },
+    'oracle_tests': {
+        # Independent acceptance tests before implementation (other vendor than the implementer),
+        # must fail on the base commit, read-only for workers; mutation gate after checks pass.
+        'enabled': True,
+        'tiers': ['bounded', 'medium_tough'],
+        'author_for_race': 'luna_high',
+        'max_mutants': 12,
+        'min_mutation_score': 0.5,
+    },
+    'best_of_2': {
+        # Astra and Opus implement in parallel; checks decide, pairwise judge when both pass.
+        'enabled': True,
+        'tiers': ['medium_tough'],
+        'on_escalation': True,          # a Luna task that exhausted its retries races both
+        'judge_lanes': ['opus_medium', 'astra_high'],   # both vendors judge; split -> tie-break
+    },
     'failure_triage': {
         # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),
         # local decider flags environment problems (pause + ask owner) — eval/PROBES.md.
