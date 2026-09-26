@@ -18,6 +18,7 @@ $diff
 ```
 $rebuttals
 Rules:
+- Return exactly one entry per criterion, with `index` = its number in the list above.
 - Mark a criterion unmet only if you can point at concrete code or missing behaviour;
   give that evidence in `reason`. A criterion met in an unusual but valid way is met.
 - Harmless extra refactoring is fine. Ignore style.

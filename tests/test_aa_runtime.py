@@ -83,9 +83,12 @@ class FakeWorkers(Workers):
 
 
 def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
-    return {'criteria': [{'criterion': c, 'met': False, 'reason': f'{c} missing'} for c in unmet] +
-                        [{'criterion': 'a', 'met': True, 'reason': 'ok'}],
-            'tampering': tampering, 'tampering_reason': 'skipped a test' if tampering else ''}
+    """Verdict for the single test criterion 'a'; unmet names become the judged criterion text."""
+    if unmet:
+        crit = [{'index': 1, 'criterion': ', '.join(unmet), 'met': False, 'reason': f'{", ".join(unmet)} missing'}]
+    else:
+        crit = [{'index': 1, 'criterion': 'a', 'met': True, 'reason': 'ok'}]
+    return {'criteria': crit, 'tampering': tampering, 'tampering_reason': 'skipped a test' if tampering else ''}
 
 
 def _kind(log_name: str) -> str:
@@ -502,6 +505,17 @@ class LocalFlowTests(unittest.TestCase):
         self.assertIn('base commit before the change: test', prompts[0])
         self.assertFalse((self.env.cfg.state_dir / 'base-wt' / tid).exists(), 'base worktree cleaned up')
 
+    def test_incomplete_spec_verdict_never_passes(self):
+        empty = lambda lane, cwd, prompt, extra: Result(True, '', {'criteria': [], 'tampering': False,
+                                                                   'tampering_reason': ''}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': empty},
+                       FakeCLM('routine'))
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(40)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'BLOCKED')
+        self.assertIn('judged criteria []', t['result'])
+
     def test_billing_error_blocks_without_dispatch(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'billing_error': True},
                        FakeCLM('routine'))
@@ -766,6 +780,45 @@ class DeepFlowTests(unittest.TestCase):
         self.env.run()
         self.assertEqual(self.env.db.case(cid)['phase'], 'DONE')
         self.assertEqual(sh(self.env.target_origin, 'git', 'show', f'aa/case-{cid}:done.txt'), 'ok')
+
+    def test_undeclared_commit_after_go_goes_back_to_pro(self):
+        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE')})
+        self.draft(cid)
+        self.env.run()
+        base = self.env.db.task(tid)['base_ref']
+        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'done.txt': 'ok'})
+        self.env.pro_implement(f'aa/case-{cid}', sha, {'extra.txt': 'undeclared'})   # tip moves on
+        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
+                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
+                                  f'TURN-COMPLETE: {cid}/02\n'})
+        self.env.run()
+        c = self.env.db.case(cid)
+        self.assertEqual((c['phase'], c['pro_turn']), ('WAIT_PRO', 3))
+        turn3 = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/PRO-TURN-03.md')
+        self.assertIn('not at the declared TARGET-COMMIT', turn3)
+        self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
+
+    def test_failed_push_after_local_fix_does_not_complete(self):
+        def fix(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'fixed', None, [lane.model])
+        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE'), 'fix': fix})
+        self.draft(cid)
+        self.env.run()
+        base = self.env.db.task(tid)['base_ref']
+        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'app.py': 'print(2)\n'})
+        hook = self.env.target_origin / 'hooks' / 'pre-receive'
+        hook.write_text('#!/bin/sh\necho rejected >&2\nexit 1\n')
+        hook.chmod(0o755)
+        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
+                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
+                                  f'TURN-COMPLETE: {cid}/02\n'})
+        self.env.run()
+        c = self.env.db.case(cid)
+        self.assertNotEqual(c['phase'], 'DONE')
+        self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
+        kinds = [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE case_id=?', (cid,))]
+        self.assertIn('step_error', kinds)
 
     def test_post_go_design_issue_goes_back_to_pro(self):
         design = lambda lane, cwd, prompt, extra: Result(True, 'DESIGN_ISSUE: schema wrong', None, [lane.model])

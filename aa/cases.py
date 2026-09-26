@@ -271,8 +271,15 @@ class CaseFlow:
         target, branch = Path(t['repo']), c['data']['impl_branch']
         git.git(target, 'fetch', '-q', 'origin', branch)
         fresh = c['data'].get('fixes', 0) == 0   # first verification after a Pro GO
-        if fresh and not _is_ancestor(target, c['data']['impl_commit'], f'origin/{branch}'):
-            self._fail(c, f'Pro implementation commit {c["data"]["impl_commit"]} not on origin/{branch}')
+        declared = c['data']['impl_commit']
+        tip = git.git(target, 'rev-parse', f'origin/{branch}')
+        if fresh and not (len(declared) >= 7 and tip.startswith(declared)):
+            # Only the exact commit Pro declared with GO may be verified and delivered.
+            if not _is_ancestor(target, declared, f'origin/{branch}'):
+                self._fail(c, f'Pro implementation commit {declared} not on origin/{branch}')
+            else:
+                self._back_to_pro(c, f'origin/{branch} is at {tip[:12]}, not at the declared TARGET-COMMIT '
+                                     f'{declared[:12]}. Declare the final commit of the branch.')
             return
         wt = self._impl_wt(c)
         if not wt.exists():
@@ -284,7 +291,9 @@ class CaseFlow:
         git.discard(wt)                      # drop artefacts produced by the checks
         c['data']['checks_result'] = checks_mod.summary(results)
         if all(r.ok for r in results):
-            git.git(wt, 'push', '-q', 'origin', f'HEAD:{branch}', check=False)
+            # Must succeed before completion: a failed push raises, the daemon retries and then
+            # pauses the case, instead of reporting success for fixes that never reached the remote.
+            git.git(wt, 'push', '-q', 'origin', f'HEAD:{branch}')
             self.db.update_case(c['id'], phase='DONE', data=c['data'])
             self.db.update_task(t['id'], status='DONE',
                                 result=f'deep case {c["id"]}: branch {branch} verified')
@@ -321,8 +330,8 @@ class CaseFlow:
     def _back_to_pro(self, c: dict, reason: str) -> None:
         self.db.event('back_to_pro', c['task_id'], c['id'], reason=reason[:500])
         wt = self._impl_wt(c)
-        if wt.exists():
-            git.git(wt, 'push', '-q', 'origin', f'HEAD:{c["data"]["impl_branch"]}', check=False)
+        if wt.exists():                       # Pro must see the local fixes: a failed push raises
+            git.git(wt, 'push', '-q', 'origin', f'HEAD:{c["data"]["impl_branch"]}')
         c['data']['awaiting'] = 'review'
         self.db.update_case(c['id'], data=c['data'])
         note = (f'\n**Post-GO verification failed.** {reason}\nFailing checks on '

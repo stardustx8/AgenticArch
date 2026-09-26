@@ -75,9 +75,9 @@ SPEC_SCHEMA = {
     'required': ['criteria', 'tampering', 'tampering_reason'],
     'properties': {
         'criteria': {'type': 'array', 'items': {
-            'type': 'object', 'additionalProperties': False, 'required': ['criterion', 'met', 'reason'],
-            'properties': {'criterion': {'type': 'string'}, 'met': {'type': 'boolean'},
-                           'reason': {'type': 'string'}}}},
+            'type': 'object', 'additionalProperties': False, 'required': ['index', 'criterion', 'met', 'reason'],
+            'properties': {'index': {'type': 'integer'}, 'criterion': {'type': 'string'},
+                           'met': {'type': 'boolean'}, 'reason': {'type': 'string'}}}},
         'tampering': {'type': 'boolean'},
         'tampering_reason': {'type': 'string'},
     },
@@ -536,6 +536,10 @@ class TaskFlow(QualityMixin):
         if not res.ok or not res.structured:
             raise RuntimeError(f'spec judge failed: {res.error[:300]}')   # daemon retries, then BLOCKED
         verdict = res.structured
+        judged = sorted(c.get('index') for c in verdict['criteria'] if isinstance(c.get('index'), int))
+        if judged != list(range(1, len(criteria) + 1)):
+            # An incomplete or duplicated verdict never counts as "all met": retry, then BLOCKED.
+            raise RuntimeError(f'spec judge failed: judged criteria {judged}, expected 1..{len(criteria)}')
         unmet = [c for c in verdict['criteria'] if not c['met']]
         loops = t['data'].get('spec_loops', 0)
         t['data'].setdefault('spec_reviews', []).append(
