@@ -1148,7 +1148,7 @@ class QualityTests(unittest.TestCase):
         self.env.run()
         m = self.env.db.task(tid)['data']['mutation']
         self.assertEqual((m['killed'], m['total']), (0, 1))
-        self.assertIn('independent acceptance tests are weak', judged[0])
+        self.assertIn('independent acceptance tests may be weak', judged[0])
 
     def _race_env(self, work, pick=None, tier='medium_tough'):
         script = {'triage': triage(tier), 'work': work}

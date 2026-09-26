@@ -244,8 +244,9 @@ class QualityMixin:
         notes = []
         m = t['data'].get('mutation') or {}
         if m.get('score') is not None and m['score'] < float(self.cfg['oracle_tests'].get('min_mutation_score', 0.5)):
-            notes.append(f'The independent acceptance tests are weak: they detected only {m["killed"]} of '
-                         f'{m["total"]} deliberately planted bugs in the changed code; surviving mutants:\n' +
+            notes.append(f'The independent acceptance tests may be weak: they detected only {m["killed"]} of '
+                         f'{m["total"]} deliberately planted bugs in the changed code. Surviving mutants (some may be '
+                         'equivalent, i.e. not change behaviour; check which ones would):\n' +
                          '\n'.join(f'  - {s}' for s in m['survivors']) +
                          '\nJudge the criteria from the code itself, not from the passing tests.')
         if t['data'].get('oracle_dropped'):

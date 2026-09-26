@@ -123,3 +123,12 @@ candidate pools raise the chance a correct fix exists; judges prefer their own f
 pairwise pick uses a two-vendor panel. Live 2026-09-26: first run exposed a syntax-broken oracle
 that escalated to Pro (fixed: validation, repair round, dispute safety net); second run
 t0926-ac228 delivered end to end (both racers passed, both judges picked Astra).
+
+## D021: Gemma 4 31B as local neutral judge and test writer, added 2026-09-26
+
+From the owner's archive (only model that fits and fits the roles; Qwen3-Coder-Next and
+Flash-Next do not fit). Served FP8 on loopback. Roles per research (heterogeneous teams,
+self-preference of judges, local models only where output is verifiable): (1) tie-break when
+the Opus/Astra pick panel splits, judged in both orders; (2) extra independent oracle test
+set (main author in races). Measured 98% on the blind spec-conformance probe. It never
+approves or vetoes on its own; its tests pass the same validation as any oracle.

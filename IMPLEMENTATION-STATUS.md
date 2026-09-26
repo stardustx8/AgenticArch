@@ -18,6 +18,7 @@
   after the environment was fixed and `retry` sent, checks + Opus spec review passed, delivered.
 - Claude workers: auto-mode classifier + hard denies, no MCP connectors (D018).
 - Oracle tests + mutation gate + cross-vendor best-of-2 (D020), live t0926-ac228.
+- Gemma 4 31B local judge/test writer (D021), live t0926-1b930 (two independent test sets).
 
 ## Implemented, tested offline, not yet exercised live
 

@@ -8,6 +8,7 @@ Operations manual for the working system (installed on the workstation 2026-09-2
 | --- | --- | --- |
 | `aa-daemon` | Coordinator: tasks, deep cases, owner replies | `bin/aa daemon`, state in `~/.local/share/agenticarch/aa.sqlite` |
 | `aa-semif` | SemIf decider: Qwen3.5-4B in the `ai-lab/private-semif` container, `--network none`, Unix socket, ~9 GB VRAM | model + source in `~/.local/share/agenticarch/semif/` |
+| `aa-gemma` | Gemma 4 31B (vLLM, FP8, loopback :8100, ~52 GB incl. KV): neutral tie-break judge + extra test writer | `~/.local/share/agenticarch/models/gemma-4-31B-it` (from the archive, sha256-verified) |
 | `aa-clm-embed`, `aa-clm` | CLM (vLLM Qwen3-8B + clm-serve), loopback; **disabled** since D016, re-enable with `decider.backend = "clm"` | venv `~/.local/share/agenticarch/clm-venv` |
 | `aa-ntfy-forward` | Exposes loopback ntfy on the Tailscale IP :8093 | `deploy/bin/tcp_forward.py` |
 | docker `ntfy` | Self-hosted ntfy (rootless Docker, 127.0.0.1:8093) | data in `~/.local/share/agenticarch/ntfy` |
@@ -24,10 +25,12 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
   -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
-  -> oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests,
+  -> oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
+     (+ an extra set by local Gemma; in races Gemma is the neutral main author),
      validated (syntax, must fail on base; one repair round), read-only for workers
   -> medium_tough (or a Luna task out of retries): Astra and Opus race in parallel worktrees;
-     checks decide, two-vendor judge panel when both pass (split -> smaller diff)
+     checks decide, two-vendor judge panel when both pass (split -> Gemma in both orders,
+     inconsistent -> smaller diff)
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
      fail -> failure triage per failed check:
        passes on rerun: FLAKY (noted) | SemIf says environment: pause + ntfy Retry/Treat as code/Cancel
@@ -87,6 +90,10 @@ Benchmark (eval/RESULTS.md), tier accuracy on a blind holdout: Codex triage 90%,
 82%, keyword rules 57%, CLM 38%. Votes below `decider.min_confidence` (0.2) abstain.
 As a second voter next to Codex, no decider lowered total error cost; ask-on-disagreement
 pings the owner on ~20% of tasks with SemIf.
+
+GPU budget: SemIf ~9 GB + Gemma ~52 GB. The owner's AI Lab models (artemis/ortenzya, ~58 GB)
+do not fit alongside Gemma: `systemctl --user stop aa-gemma` first (aa then falls back to Luna
+for race tests and to the smaller-diff tie-break).
 
 ## Operations
 
