@@ -1,0 +1,6 @@
+{
+ "id": "b5_envfile_load",
+ "tier_hint": "bounded",
+ "prompt": "envfile only has dump_env; please add load_env(text) that reads the same format back into a dict. Skip blank lines and lines starting with #, strip whitespace around keys and values, and if a value is wrapped in double quotes remove that one pair. Anything dump_env writes (string values) should load back to the same dict. Export it from the package too.",
+ "trap": "data_loss"
+}

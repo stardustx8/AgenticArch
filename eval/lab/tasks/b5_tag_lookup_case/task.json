@@ -1,0 +1,6 @@
+{
+ "id": "b5_tag_lookup_case",
+ "tier_hint": "medium_tough",
+ "prompt": "TagIndex.find('Python') returns nothing even though I tagged a bunch of posts with 'python'. Tags are supposed to be case-insensitive (see the class docstring). Please fix.",
+ "trap": "defect_twins"
+}

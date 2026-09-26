@@ -1300,6 +1300,63 @@ class OracleValidationTests(unittest.TestCase):
         self.assertIn('oracle_dropped', [k for k, _ in self.events(tid)])
         self.assertNotIn('oracle_tests', t['data']['checks'])
 
+    # Lab runs b2_ledger_reversals_idempotency / b3_path_parent_segments: a wrong local test set,
+    # also run by the repo's own test command, blocked the task until it escalated to Pro.
+    SUITE = 'test -f done.txt && for f in tests/*.sh; do [ -e $f ] || continue; sh $f || exit 1; done'
+
+    @staticmethod
+    def wrong_local_set(lane, cwd, prompt, extra):
+        if lane.cli == 'local':
+            return Result(True, 'FILE: tests/check_indep.sh\n```sh\nexit 1\n```\nCOMMAND: sh tests/check_indep.sh\n',
+                          None, [lane.model])
+        return oracle_writer()(lane, cwd, prompt, extra)
+
+    @staticmethod
+    def disputing_worker(status):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text(lane.name)
+            item = 'tests/check_indep.sh can never pass; it contradicts the task and is read-only for me'
+            return Result(True, '{}', {'status': status, 'summary': 'implemented', 'rebuttals': [],
+                                       'open_items': [item] if status == 'partial' else [],
+                                       'question': item if status == 'blocked' else ''}, [lane.model])
+        return work
+
+    def test_single_lane_drops_only_the_disputed_test_set(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'local': True,
+                                  'work': self.disputing_worker('partial'), 'oracle': self.wrong_local_set},
+                       FakeCLM('bounded'), checks=self.SUITE, oracle=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['case_id']), ('DONE', None))
+        self.assertEqual(t['data']['oracle']['authors'], ['opus_medium'])      # the valid set stays a check
+        self.assertIn('oracle_tests', t['data']['checks'])
+        files = sh(self.env.target, 'git', 'ls-tree', '-r', '--name-only', f'aa/{tid}')
+        self.assertIn('tests/check_feature.sh', files)
+        self.assertNotIn('tests/check_indep.sh', files)
+        self.assertFalse([s for s in self.env.sent if 'Question' in s[0]], 'no owner ping for a test dispute')
+
+    def test_race_blocked_on_wrong_tests_drops_them(self):
+        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'local': True,
+                                  'work': self.disputing_worker('blocked'), 'oracle': self.wrong_local_set},
+                       FakeCLM('medium_tough'), checks=self.SUITE, oracle=True, best_of_2=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['case_id']), ('DONE', None))
+        self.assertIsNone(t['data']['oracle'])
+        self.assertNotIn('tests/check_indep.sh', sh(self.env.target, 'git', 'ls-tree', '-r', '--name-only', f'aa/{tid}'))
+
+    def test_undisputed_oracle_failure_still_goes_back_to_the_worker(self):
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'local': True,
+                                  'work': self.disputing_worker('done'), 'oracle': self.wrong_local_set},
+                       FakeCLM('bounded'), checks=self.SUITE, oracle=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertNotEqual(t['status'], 'DONE')
+        self.assertNotIn('oracle_dropped', [k for k, _ in self.events(tid)])
+
 
 class LocalModelTests(unittest.TestCase):
     """Gemma (local lane) as extra independent test writer and as neutral tie-breaker."""

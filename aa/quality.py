@@ -162,9 +162,9 @@ class QualityMixin:
                 accepted.append((author, v))
                 self.db.event('oracle_ready', t['id'], author=author, files=v['files'][:10])
         if accepted:
-            t['data']['oracle'] = {'files': [f for _, v in accepted for f in v['files']],
-                                   'command': ' && '.join(f'( {v["command"]} )' for _, v in accepted),
-                                   'commit': accepted[-1][1]['commit'], 'authors': [a for a, _ in accepted]}
+            # One part per author, so a disputed test set can be dropped without the others.
+            parts = [{'author': a, 'files': v['files'], 'command': v['command']} for a, v in accepted]
+            t['data']['oracle'] = {**_join_parts(parts), 'commit': accepted[-1][1]['commit']}
             t['data']['checks'] = {**t['data'].get('checks', {}), 'oracle_tests': t['data']['oracle']['command']}
         else:
             git.remove_worktree(repo, wt)
@@ -253,20 +253,55 @@ class QualityMixin:
         commit = git.commit_all(wt, f'aa {t["id"]}: independent acceptance tests (oracle)')
         return {'files': tests, 'command': cmd, 'commit': commit, 'base_failure': base_run.output[-800:]}, ''
 
-    def _drop_oracle(self, t: dict, reason: str) -> None:
-        """Safety net: an oracle that only blocks and is disputed by the implementer is removed."""
-        if not t['data'].get('oracle'):
+    def _drop_oracle(self, t: dict, reason: str, wts=(), disputed=None) -> None:
+        """Safety net: disputed oracle tests that are all that still fails are removed. Drops the
+        test set of every author whose file was named (every set when none is named) and deletes
+        those files in the given worktrees: the repo's own test command usually runs them too."""
+        oracle = t['data'].get('oracle')
+        if not oracle:
             return
-        t['data']['checks'].pop('oracle_tests', None)
+        parts = oracle.get('parts') or [{'author': '?', 'files': oracle['files'], 'command': oracle['command']}]
+        named = set(disputed or [])
+        drop = [p for p in parts if named & set(p['files'])] or parts
+        keep = [p for p in parts if p not in drop]
+        gone = [f for p in drop for f in p['files']]
+        for wt in wts:
+            present = [f for f in gone if (Path(wt) / f).exists()]
+            if present:
+                git.git(Path(wt), 'rm', '-q', '--', *present, check=False)
+                git.commit_all(Path(wt), f'aa {t["id"]}: drop disputed acceptance tests')
+        if keep:
+            oracle.update(_join_parts(keep))
+            t['data']['checks']['oracle_tests'] = oracle['command']
+        else:
+            t['data']['checks'].pop('oracle_tests', None)
+            t['data']['oracle'] = None
         t['data']['oracle_dropped'] = reason[:500]
-        t['data']['oracle'] = None
-        self.db.event('oracle_dropped', t['id'], reason=reason[:300])
+        self.db.event('oracle_dropped', t['id'], authors=[p['author'] for p in drop], files=gone[:10],
+                      reason=reason[:300])
 
-    def _oracle_disputed(self, t: dict, texts: list[str]) -> bool:
-        oracle = t['data'].get('oracle') or {}
-        names = [f.rsplit('/', 1)[-1] for f in oracle.get('files', [])]
+    def _disputed_oracle_files(self, t: dict, texts: list[str]) -> list[str]:
+        """Oracle files a worker's text names; all of them for a generic 'acceptance test' complaint."""
+        files = (t['data'].get('oracle') or {}).get('files', [])
         blob = ' '.join(texts).lower()
-        return any(n.lower() in blob for n in names) or 'acceptance test' in blob
+        named = [f for f in files if f.rsplit('/', 1)[-1].lower() in blob]
+        return named or (list(files) if 'acceptance test' in blob else [])
+
+    def _fails_only_by_oracle(self, t: dict, wt: Path, failed: list) -> bool:
+        """True when every failed check passes with the oracle test files hidden. The repo's own test
+        command usually discovers them too, so 'tests' fails together with 'oracle_tests'."""
+        oracle = t['data'].get('oracle')
+        if not oracle or not failed:
+            return False
+        others = {r.name: r.command for r in failed if r.name != 'oracle_tests'}
+        if not others:
+            return True
+        for f in oracle['files']:
+            (wt / f).unlink(missing_ok=True)
+        try:
+            return all(r.ok for r in checks_mod.run(others, wt))
+        finally:
+            git.discard(wt)
 
     def _protect_oracle(self, t: dict, wt: Path) -> list[str]:
         """Restore oracle test files after a worker run; return the ones the worker had changed."""
@@ -391,13 +426,18 @@ class QualityMixin:
             rep = worker_report(res)
             self._protect_oracle(t, wt)
             git.commit_all(wt, f'aa wip {t["id"]} race ({lane})')
-            failed, failing = 99, []
-            if rep['status'] in ('done', 'partial') and (res.ok or rep['from_schema']):
+            failed, failing, oracle_only = 99, [], False
+            disputed = self._disputed_oracle_files(t, [rep['summary'], rep['question'], *rep['open_items'],
+                                                       *rep['rebuttals'], *rep['spec_conflicts']])
+            # A worker that stopped because it says an independent test is wrong still gets checked.
+            if (rep['status'] in ('done', 'partial') or disputed) and (res.ok or rep['from_schema']):
                 runs = checks_mod.run(t['data'].get('checks') or {}, wt)
                 git.discard(wt)
                 failing = [r.name for r in runs if not r.ok]
                 failed = len(failing)
+                oracle_only = self._fails_only_by_oracle(t, wt, [r for r in runs if not r.ok])
             results[lane] = {'status': rep['status'], 'failed': failed, 'failing': failing,
+                             'oracle_only': oracle_only, 'disputed': disputed,
                              'summary': rep['summary'][-600:], 'rebuttals': rep['rebuttals'][:5],
                              'question': rep['question'], 'seconds': round(res.seconds)}
         t['data']['race'] = results
@@ -409,16 +449,17 @@ class QualityMixin:
     def _select(self, t: dict, cands: dict, lanes: list[str], results: dict) -> None:
         repo = Path(t['repo'])
         tri = t['data'].get('triage') or {}
-        if all(r['status'] == 'blocked' for r in results.values()):
+        if all(r['status'] == 'blocked' and not r.get('disputed') for r in results.values()):
             self._cleanup_race(t, keep=None)
             self._ask_owner(t, next(iter(results.values()))['question'] or 'The workers need your input.')
             return
         passing = [l for l, r in results.items() if r['failed'] == 0 and r['status'] == 'done']
-        oracle_only = [l for l, r in results.items() if r['failing'] == ['oracle_tests']]
-        if not passing and oracle_only and self._oracle_disputed(
-                t, [results[l]['summary'] + ' '.join(results[l]['rebuttals']) for l in oracle_only]):
-            self._drop_oracle(t, 'every candidate passed all other checks and disputed the acceptance tests: ' +
-                              results[oracle_only[0]]['summary'][:300])
+        oracle_only = [l for l, r in results.items() if r.get('oracle_only') and r.get('disputed')]
+        if not passing and oracle_only:
+            self._drop_oracle(t, 'a candidate passed everything except the acceptance tests it disputed: ' +
+                              (results[oracle_only[0]]['question'] or results[oracle_only[0]]['summary'])[:300],
+                              wts=list(cands.values()),
+                              disputed=sorted({f for l in oracle_only for f in results[l]['disputed']}))
             passing = oracle_only
         if len(passing) == 2:
             winner, reason, did = self._pairwise_pick(t, cands, lanes)
@@ -511,6 +552,12 @@ class QualityMixin:
         return (f'\nIndependent acceptance tests were written before you started: {", ".join(oracle["files"])} '
                 f'(run with `{oracle["command"]}`). They must pass. They are read-only: any change to them is '
                 'reverted and reported as tampering. If you believe a test is wrong, say so in `rebuttals`.\n')
+
+
+def _join_parts(parts: list[dict]) -> dict:
+    return {'files': [f for p in parts for f in p['files']],
+            'command': ' && '.join(f'( {p["command"]} )' for p in parts),
+            'authors': [p['author'] for p in parts], 'parts': parts}
 
 
 def _is_test_path(p: str) -> bool:

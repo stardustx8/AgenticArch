@@ -5,7 +5,7 @@ Each run: fresh git repo from eval/lab/tasks/<id>/repo, isolated state dir, conf
 the variant, simulated owner (every simulated answer counts as a ping), then the HIDDEN tests are
 run on the delivered branch. Results: eval/lab/results/<variant>.jsonl (one line per task).
 
-  python3 tools/lab.py --variant baseline --flags '{}' [--tasks 'b1_*'] [--parallel 3]
+  python3 tools/lab.py --variant baseline --flags '{}' [--tasks 'b1_*,b5_*'] [--parallel 3]
   python3 tools/lab.py --report                       # compare all variants (paired on tasks)
 """
 from __future__ import annotations
@@ -102,14 +102,29 @@ def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int) -> dict:
             time.sleep(1)
         t = db.task(tid)
         hidden = hidden_all = None
+        art = RESULTS / 'runs' / variant / meta['id']            # evidence kept for failure analysis
+        shutil.rmtree(art, ignore_errors=True)
+        art.mkdir(parents=True, exist_ok=True)
+        (art / 'task.json').write_text(json.dumps({k: v for k, v in t.items() if k != 'data'}, indent=1, default=str))
+        (art / 'data.json').write_text(json.dumps(t['data'], indent=1, default=str))
+        (art / 'events.txt').write_text('\n'.join(f'{e["kind"]} {e["detail"]}' for e in
+                                                  db.q('SELECT kind, detail FROM events ORDER BY id')))
+        wt_oracle = tmp / 'state' / 'worktrees' / f'{tid}-oracle'
+        if wt_oracle.exists():
+            for f in (t['data'].get('oracle') or {}).get('files', []):
+                if (wt_oracle / f).exists():
+                    (art / f'oracle__{Path(f).name}').write_text((wt_oracle / f).read_text())
         if t['status'] == 'DONE':
             check = tmp / 'check'
             sh(repo, 'git', 'worktree', 'add', '-q', str(check), t['branch'] or f'aa/{tid}')
             shutil.copytree(task_dir / 'hidden', check, dirs_exist_ok=True)
             run = lambda pat: subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.',
                                               '-p', pat], cwd=check, capture_output=True, text=True, timeout=300)
-            hidden = run('test_hidden_*.py').returncode == 0
+            h = run('test_hidden_*.py')
+            hidden = h.returncode == 0
             hidden_all = run('test*.py').returncode == 0
+            (art / 'hidden_output.txt').write_text(h.stdout + h.stderr)
+            (art / 'delivered.diff').write_text(sh(repo, 'git', 'diff', 'main', t['branch'] or f'aa/{tid}'))
         d = t['data']
         usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}
         for c in log.calls:
@@ -137,6 +152,16 @@ def _count(items) -> dict:
     return out
 
 
+def mcnemar_p(win: int, loss: int) -> float:
+    """Exact two-sided McNemar (binomial) p-value on discordant pairs."""
+    from math import comb
+    n = win + loss
+    if n == 0:
+        return 1.0
+    k = min(win, loss)
+    return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
+
+
 def report() -> None:
     rows = [json.loads(l) for f in sorted(RESULTS.glob('*.jsonl')) for l in open(f)]
     by = {}
@@ -152,7 +177,7 @@ def report() -> None:
         paired = [t for t in tasks if t in base and v != 'baseline']
         win = sum(1 for t in paired if tasks[t]['hidden_pass'] and not base[t]['hidden_pass'])
         loss = sum(1 for t in paired if base[t]['hidden_pass'] and not tasks[t]['hidden_pass'])
-        cmp = f'+{win}/-{loss} of {len(paired)}' if paired else '-'
+        cmp = f'+{win}/-{loss} p={mcnemar_p(win, loss):.2f}' if paired else '-'
         print(f'{v:24} {n:>3} {passed / n:>10.0%} {cmp:>22} {sum(r["seconds"] for r in rs) / 60 / n:>6.1f} '
               f'{sum(r["codex_tokens"] for r in rs) / 1e6 / n:>10.2f} {sum(r["claude_usd_equiv"] for r in rs) / n:>10.2f} '
               f'{sum(r["pings"] for r in rs) / n:>6.2f}')
@@ -171,7 +196,8 @@ def main() -> int:
         report()
         return 0
     flags = json.loads(a.flags)
-    tasks = sorted(d for d in (LAB / 'tasks').iterdir() if fnmatch.fnmatch(d.name, a.tasks))
+    tasks = sorted(d for d in (LAB / 'tasks').iterdir()
+                   if any(fnmatch.fnmatch(d.name, p) for p in a.tasks.split(',')))
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f'{a.variant}.jsonl'
     lock = threading.Lock()

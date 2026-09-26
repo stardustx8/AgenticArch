@@ -81,7 +81,7 @@ def main() -> int:
             (d / 'repo' / 'tests' / '__init__.py').touch()
             write_tree(d / 'hidden', task['hidden_tests'])
             write_tree(d / 'reference', task['reference'])
-            (d / 'task.json').write_text(json.dumps({k: task[k] for k in ('id', 'tier_hint', 'prompt')}, indent=1))
+            (d / 'task.json').write_text(json.dumps({k: task.get(k, 'none') for k in ('id', 'tier_hint', 'prompt', 'trap')}, indent=1))
             kept += 1
     print(f'kept {kept}, rejected {rejected}')
     return 0

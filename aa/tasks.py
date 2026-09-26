@@ -341,10 +341,18 @@ class TaskFlow(QualityMixin):
             t['data']['rebuttals'] = report['rebuttals'][:10]
         if report['spec_conflicts']:
             t['data']['spec_conflicts'] = report['spec_conflicts'][:10]
-            if self._oracle_disputed(t, report['spec_conflicts']):   # conflicts with the oracle = dispute
+            if self._disputed_oracle_files(t, report['spec_conflicts']):   # conflicts with the oracle = dispute
                 t['data']['rebuttals'] = (t['data'].get('rebuttals') or []) + report['spec_conflicts'][:5]
+        # A worker that stops because an independent test is wrong: the coordinator checks the claim
+        # itself (_verify drops those tests only if they are all that fails) instead of asking the owner.
+        stop_texts = [x for x in (report['question'], *report['open_items']) if x]
+        disputed = (report['status'] in ('partial', 'blocked') and
+                    self._disputed_oracle_files(t, stop_texts + [report['summary']]))
+        if disputed:
+            t['data']['rebuttals'] = (t['data'].get('rebuttals') or []) + (stop_texts or [report['summary']])[:5]
+            self.db.event('oracle_disputed', t['id'], status=report['status'], files=disputed[:10])
         self.db.update_task(t['id'], passes=passes, lane_passes=lane_passes, data=t['data'])
-        if report['status'] == 'blocked':
+        if report['status'] == 'blocked' and not disputed:
             self._ask_owner(t, report['question'] or report['summary'])
             return
         if not res.ok and not report['from_schema']:
@@ -352,7 +360,7 @@ class TaskFlow(QualityMixin):
             t['data']['last_failure'] = f'worker error: {res.error[:1500]}'
             self._retry_or_escalate(t)
             return
-        if report['status'] == 'partial':
+        if report['status'] == 'partial' and not disputed:
             # No point running checks on known-incomplete work: send it straight back.
             t = self.db.task(t['id'])
             t['data']['last_failure'] = ('You reported the task as partial. Still required:\n' +
@@ -401,11 +409,12 @@ class TaskFlow(QualityMixin):
         git.discard(wt)                      # drop artefacts produced by the checks
         t['data']['checks_result'] = checks_mod.summary(results)
         failed = [r for r in results if not r.ok]
-        if ([r.name for r in failed] == ['oracle_tests'] and t['data'].get('rebuttals') and
-                self._oracle_disputed(t, t['data']['rebuttals'])):
-            self._drop_oracle(t, 'the implementer passed all other checks and disputed the acceptance tests: ' +
-                              ' '.join(t['data']['rebuttals'])[:300])
-            failed = []
+        disputed = self._disputed_oracle_files(t, t['data'].get('rebuttals') or [])
+        if disputed and self._fails_only_by_oracle(t, wt, failed):
+            self._drop_oracle(t, 'the implementer passed everything except the acceptance tests it disputed: ' +
+                              ' '.join(t['data']['rebuttals'])[:300], wts=[wt], disputed=disputed)
+            self.db.update_task(t['id'], data=t['data'])      # stays in VERIFY: re-run the checks without them
+            return
         if failed and self.cfg['failure_triage'].get('enabled', True):
             failed = self._triage_failures(t, wt, failed)
             if failed is None:               # paused for the owner (environment problem)
@@ -449,9 +458,11 @@ class TaskFlow(QualityMixin):
             code, out = cache[cmd]
             return checks_mod.CheckRun('base', cmd, code, out)
 
+        # Oracle tests fail on the base commit by design, so they are never PRE_EXISTING.
+        oracle_failed = [r for r in failed if r.name == 'oracle_tests']
         verdicts = [triage(r, wt, run_on_base, self.decider, task_id=t['id'],
                            min_confidence=float(self.cfg['failure_triage']['min_confidence']))
-                    for r in failed]
+                    for r in failed if r.name != 'oracle_tests']
         git.discard(wt)                      # artefacts from the reruns
         notes = t['data'].setdefault('triage_notes', {})
         spec_on = self.cfg['spec_check'].get('enabled', True)
@@ -476,7 +487,7 @@ class TaskFlow(QualityMixin):
                                  ('Cancel', f'cancel {t["id"]}')], priority=4, tags='wrench')
             return None
         codes = {v.check for v in verdicts if v.action == 'CODE'}
-        return [r for r in failed if r.name in codes]
+        return [r for r in failed if r.name in codes] + oracle_failed
 
     def env_retry(self, tid: str) -> None:
         t = self.db.task(tid)
