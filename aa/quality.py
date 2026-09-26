@@ -89,12 +89,18 @@ class QualityMixin:
                         acceptance=bullet(tri.get('acceptance_criteria')),
                         checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none)'),
                         owner_answers=self._answers_text(t))
-        try:
-            res = self.workers.execute(LANES[author], prompt, wt, schema=ORACLE_SCHEMA, log_name=f'{t["id"]}-oracle')
-        except BillingError as exc:
-            res = None
-            self.db.event('oracle_skipped', t['id'], reason=f'billing: {exc}'[:300])
-        verdict = self._validate_oracle(t, wt, res)
+        verdict, problem = None, ''
+        for attempt in (1, 2):                      # one repair round with the exact validation error
+            repair = (f'\nYour previous tests were rejected: {problem}\nFix them.\n' if problem else '')
+            try:
+                res = self.workers.execute(LANES[author], prompt + repair, wt, schema=ORACLE_SCHEMA,
+                                           log_name=f'{t["id"]}' + ('' if attempt == 1 else '-repair') + '-oracle')
+            except BillingError as exc:
+                self.db.event('oracle_skipped', t['id'], reason=f'billing: {exc}'[:300])
+                break
+            verdict, problem = self._validate_oracle(t, wt, res)
+            if verdict or not problem.startswith('invalid'):
+                break
         if verdict:
             t['data']['oracle'] = verdict
             t['data']['checks'] = {**t['data'].get('checks', {}), 'oracle_tests': verdict['command']}
@@ -105,26 +111,48 @@ class QualityMixin:
         self.db.update_task(t['id'], data=t['data'])
         self._start_after_oracle(self.db.task(t['id']))
 
-    def _validate_oracle(self, t: dict, wt: Path, res) -> dict | None:
+    def _validate_oracle(self, t: dict, wt: Path, res) -> tuple[dict | None, str]:
+        """Returns (oracle, '') or (None, reason). Reasons starting with 'invalid' allow one repair."""
+        def reject(reason: str):
+            self.db.event('oracle_rejected', t['id'], reason=reason[:300])
+            return None, reason
         if res is None or not res.ok or not res.structured or not res.structured.get('command', '').strip():
-            self.db.event('oracle_rejected', t['id'], reason='author failed or gave no command')
-            return None
+            return reject('author failed or gave no command')
         changed = git.changed_paths(wt)
         tests = [p for p in changed if _is_test_path(p)]
-        others = [p for p in changed if not _is_test_path(p)]
-        for p in others:                          # the oracle author may only add tests
+        for p in (p for p in changed if not _is_test_path(p)):      # the oracle author may only add tests
             git.git(wt, 'checkout', '--', p, check=False)
             git.git(wt, 'clean', '-qf', '--', p, check=False)
         if not tests:
-            self.db.event('oracle_rejected', t['id'], reason='no test files written')
-            return None
+            return reject('no test files written')
+        for f in tests:                                            # the tests themselves must be valid code
+            err = _syntax_error(wt, f)
+            if err:
+                return reject(f'invalid test file {f}: {err}')
         cmd = res.structured['command'].strip()
         base_run = checks_mod.run({'oracle': cmd}, wt, timeout=900)[0]
         if base_run.ok:                           # tests pass without the feature: they test nothing new
-            self.db.event('oracle_rejected', t['id'], reason='tests already pass on the base commit')
-            return None
+            return reject('tests already pass on the base commit')
+        if SYNTAX_RE.search(base_run.output):
+            return reject('invalid: the tests fail with a syntax/parse error, not because the feature is missing: '
+                          + base_run.output[-600:])
         commit = git.commit_all(wt, f'aa {t["id"]}: independent acceptance tests (oracle)')
-        return {'files': tests, 'command': cmd, 'commit': commit, 'base_failure': base_run.output[-800:]}
+        return {'files': tests, 'command': cmd, 'commit': commit, 'base_failure': base_run.output[-800:]}, ''
+
+    def _drop_oracle(self, t: dict, reason: str) -> None:
+        """Safety net: an oracle that only blocks and is disputed by the implementer is removed."""
+        if not t['data'].get('oracle'):
+            return
+        t['data']['checks'].pop('oracle_tests', None)
+        t['data']['oracle_dropped'] = reason[:500]
+        t['data']['oracle'] = None
+        self.db.event('oracle_dropped', t['id'], reason=reason[:300])
+
+    def _oracle_disputed(self, t: dict, texts: list[str]) -> bool:
+        oracle = t['data'].get('oracle') or {}
+        names = [f.rsplit('/', 1)[-1] for f in oracle.get('files', [])]
+        blob = ' '.join(texts).lower()
+        return any(n.lower() in blob for n in names) or 'acceptance test' in blob
 
     def _protect_oracle(self, t: dict, wt: Path) -> list[str]:
         """Restore oracle test files after a worker run; return the ones the worker had changed."""
@@ -186,6 +214,9 @@ class QualityMixin:
                          f'{m["total"]} deliberately planted bugs in the changed code; surviving mutants:\n' +
                          '\n'.join(f'  - {s}' for s in m['survivors']) +
                          '\nJudge the criteria from the code itself, not from the passing tests.')
+        if t['data'].get('oracle_dropped'):
+            notes.append('The independent acceptance tests were dropped as invalid (' + t['data']['oracle_dropped'][:300] +
+                         '). Verify the criteria from the code itself.')
         if t['data'].get('oracle_tampered'):
             notes.append('The worker modified the independent acceptance tests (the changes were reverted): '
                          + ', '.join(sorted(set(t['data']['oracle_tampered']))) + '. Treat this as tampering.')
@@ -223,6 +254,9 @@ class QualityMixin:
                                                   schema=WORKER_SCHEMA, log_name=f'{t["id"]}-race-{lane}')
             except BillingError as exc:
                 return lane, exc
+        if t['data'].get('race_results_saved') and all(w.exists() for w in cands.values()):
+            results = t['data']['race']                       # resume after a crash: no second race
+            return self._select(t, cands, lanes, results)
         with ThreadPoolExecutor(2) as pool:
             outcomes = dict(pool.map(run, lanes))
         results = {}
@@ -234,20 +268,35 @@ class QualityMixin:
             rep = worker_report(res)
             self._protect_oracle(t, wt)
             git.commit_all(wt, f'aa wip {t["id"]} race ({lane})')
-            failed = 99
-            if rep['status'] == 'done' and (res.ok or rep['from_schema']):
+            failed, failing = 99, []
+            if rep['status'] in ('done', 'partial') and (res.ok or rep['from_schema']):
                 runs = checks_mod.run(t['data'].get('checks') or {}, wt)
                 git.discard(wt)
-                failed = sum(1 for r in runs if not r.ok)
-            results[lane] = {'status': rep['status'], 'failed': failed, 'summary': rep['summary'][-600:],
+                failing = [r.name for r in runs if not r.ok]
+                failed = len(failing)
+            results[lane] = {'status': rep['status'], 'failed': failed, 'failing': failing,
+                             'summary': rep['summary'][-600:], 'rebuttals': rep['rebuttals'][:5],
                              'question': rep['question'], 'seconds': round(res.seconds)}
         t['data']['race'] = results
+        t['data']['race_results_saved'] = True
         t['data'].setdefault('lanes_tried', []).extend(l for l in lanes if l not in t['data']['lanes_tried'])
+        self.db.update_task(t['id'], data=t['data'])
+        self._select(t, cands, lanes, results)
+
+    def _select(self, t: dict, cands: dict, lanes: list[str], results: dict) -> None:
+        repo = Path(t['repo'])
+        tri = t['data'].get('triage') or {}
         if all(r['status'] == 'blocked' for r in results.values()):
             self._cleanup_race(t, keep=None)
             self._ask_owner(t, next(iter(results.values()))['question'] or 'The workers need your input.')
             return
         passing = [l for l, r in results.items() if r['failed'] == 0 and r['status'] == 'done']
+        oracle_only = [l for l, r in results.items() if r['failing'] == ['oracle_tests']]
+        if not passing and oracle_only and self._oracle_disputed(
+                t, [results[l]['summary'] + ' '.join(results[l]['rebuttals']) for l in oracle_only]):
+            self._drop_oracle(t, 'every candidate passed all other checks and disputed the acceptance tests: ' +
+                              results[oracle_only[0]]['summary'][:300])
+            passing = oracle_only
         if len(passing) == 2:
             winner, reason, did = self._pairwise_pick(t, cands, lanes)
         elif len(passing) == 1:
@@ -284,7 +333,8 @@ class QualityMixin:
             try:
                 res = self.workers.execute(LANES[judge], prompt, cands[order[0]], write=False,
                                            schema=PICK_SCHEMA, log_name=f'{t["id"]}-pick-{judge}')
-            except BillingError:
+            except Exception as exc:              # a judge problem must never re-run the race
+                self.db.event('pick_judge_error', t['id'], judge=judge, error=repr(exc)[:300])
                 continue
             if res.ok and res.structured:
                 votes[judge] = (order[0] if res.structured['winner'] == 'A' else order[1],
@@ -345,3 +395,23 @@ def cleanup_quality_worktrees(cfg, t: dict) -> None:
     repo = Path(t['repo'])
     git.remove_worktree(repo, cfg.worktrees / f'{t["id"]}-oracle')
     git.git(repo, 'branch', '-D', f'aa/{t["id"]}-oracle', check=False)
+
+
+SYNTAX_RE = re.compile(r'SyntaxError|IndentationError|TabError|ParseError|Unexpected token|'
+                       r'syntax error|expected .* found|error\[E0\d+\]: expected')
+
+
+def _syntax_error(wt: Path, f: str) -> str:
+    """Cheap language-aware syntax check of a test file ('' = fine or unknown language)."""
+    import shutil
+    import subprocess
+    path = wt / f
+    if f.endswith('.py'):
+        cmd = ['python3', '-c', 'import ast,sys\ntry: ast.parse(open(sys.argv[1]).read(), sys.argv[1])\n'
+               'except SyntaxError as e: print(f"SyntaxError: {e.msg} (line {e.lineno})"); sys.exit(1)', str(path)]
+    elif f.endswith(('.js', '.mjs', '.cjs')) and shutil.which('node'):
+        cmd = ['node', '--check', str(path)]
+    else:
+        return ''
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return '' if p.returncode == 0 else (p.stderr or p.stdout).strip()[-400:]

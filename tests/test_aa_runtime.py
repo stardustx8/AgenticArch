@@ -76,6 +76,8 @@ class FakeWorkers(Workers):
         kind = _kind(log_name)
         if kind == 'spec' and 'spec' not in self.script:
             return Result(True, '', spec_verdict([]), [lane.model])      # default: all criteria met
+        if kind == 'pick' and 'pick' not in self.script:
+            return Result(True, '', {'winner': 'A', 'reason': 'default'}, [lane.model])
         fn = self.script[kind]
         return fn(lane, Path(cwd), prompt, extra_dirs)
 
@@ -1087,6 +1089,16 @@ class QualityTests(unittest.TestCase):
         self.env = Env(self.tmp, script, FakeCLM(tier, peer='astra'), best_of_2=True)
         return self.env.app.tasks.create(self.env.target, 'medium task')
 
+    def test_race_resumes_selection_without_rerunning_workers(self):
+        def pick(lane, cwd, prompt, extra):
+            raise RuntimeError('judge crashed')
+        tid = self._race_env(self._both_pass, pick)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(len([c for c in self.env.workers.calls if '-race-' in c[1]]), 2, 'race ran once')
+        self.assertIn('pick_judge_error', [r['kind'] for r in self.env.db.q('SELECT kind FROM events')])
+
     def test_race_checks_decide_winner(self):
         def work(lane, cwd, prompt, extra):
             if lane.name == 'astra_high':
@@ -1142,3 +1154,74 @@ class QualityTests(unittest.TestCase):
         lanes = [c[0] for c in self.env.workers.calls if not c[1].endswith(('-triage', '-spec'))]
         self.assertEqual(lanes[:2], ['luna_high', 'luna_high'])
         self.assertIn(('escalate', {'frm': 'luna_high', 'to': 'best_of_2'}), self.events(tid))
+
+
+class OracleValidationTests(unittest.TestCase):
+    """Regressions from the live run t0926-9f9b9: a syntax-broken oracle escalated to Pro."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        self.env.close()
+        self._tmp.cleanup()
+
+    def events(self, tid):
+        return [(r['kind'], json.loads(r['detail'])) for r in
+                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
+
+    def py_oracle(self, bodies):
+        calls = []
+
+        def fn(lane, cwd, prompt, extra):
+            calls.append(prompt)
+            (cwd / 'tests').mkdir(exist_ok=True)
+            (cwd / 'tests' / 'test_feature.py').write_text(bodies[min(len(calls), len(bodies)) - 1])
+            return Result(True, '{}', {'test_files': ['tests/test_feature.py'],
+                                       'command': 'python3 tests/test_feature.py', 'notes': ''}, [lane.model])
+        return fn, calls
+
+    GOOD = 'import os, sys\nsys.exit(0 if os.path.exists("done.txt") else 1)\n'
+    BROKEN = 'def test_un-grouped():\n    pass\n'
+
+    def test_syntax_error_gets_one_repair_round(self):
+        oracle, calls = self.py_oracle([self.BROKEN, self.GOOD])
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'oracle': oracle},
+                       FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(len(calls), 2)
+        self.assertIn('previous tests were rejected: invalid test file', calls[1])
+        self.assertIn('oracle_tests', t['data']['checks'])
+
+    def test_unrepairable_oracle_is_skipped(self):
+        oracle, calls = self.py_oracle([self.BROKEN, self.BROKEN])
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'oracle': oracle},
+                       FakeCLM('bounded'), oracle=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], len(calls)), ('DONE', 2))
+        self.assertNotIn('oracle_tests', t['data']['checks'])
+
+    def test_race_drops_disputed_oracle_instead_of_escalating(self):
+        impossible = 'import sys\nsys.exit(1)  # buggy oracle that can never pass\n'
+        oracle, _ = self.py_oracle([impossible])
+
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text(lane.name)
+            return Result(True, '{}', {'status': 'done', 'summary': 'implemented', 'open_items': [], 'question': '',
+                                       'rebuttals': ['tests/test_feature.py always exits 1; the acceptance test is wrong']},
+                          [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'work': work, 'oracle': oracle},
+                       FakeCLM('medium_tough'), oracle=True, best_of_2=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertIsNone(t['case_id'])
+        self.assertIn('oracle_dropped', [k for k, _ in self.events(tid)])
+        self.assertNotIn('oracle_tests', t['data']['checks'])

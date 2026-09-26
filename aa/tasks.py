@@ -395,6 +395,11 @@ class TaskFlow(QualityMixin):
         git.discard(wt)                      # drop artefacts produced by the checks
         t['data']['checks_result'] = checks_mod.summary(results)
         failed = [r for r in results if not r.ok]
+        if ([r.name for r in failed] == ['oracle_tests'] and t['data'].get('rebuttals') and
+                self._oracle_disputed(t, t['data']['rebuttals'])):
+            self._drop_oracle(t, 'the implementer passed all other checks and disputed the acceptance tests: ' +
+                              ' '.join(t['data']['rebuttals'])[:300])
+            failed = []
         if failed and self.cfg['failure_triage'].get('enabled', True):
             failed = self._triage_failures(t, wt, failed)
             if failed is None:               # paused for the owner (environment problem)
