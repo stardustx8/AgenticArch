@@ -61,6 +61,17 @@ class CallLog:
         workers.execute = execute
 
 
+def grade(check: Path, pattern: str, timeout: int = 300) -> tuple[bool, str]:
+    """Run test files matching pattern; a hang is a failed grade, not a crashed trial."""
+    try:
+        p = subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.', '-p', pattern],
+                           cwd=check, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode(errors='replace') if isinstance(exc.stdout, bytes) else (exc.stdout or '')
+        return False, out + f'\n[lab] grading timed out after {timeout} s; counted as failed\n'
+    return p.returncode == 0, p.stdout + p.stderr
+
+
 def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int, *, record_v2: bool = False) -> dict:
     from aa import config
     from aa.daemon import App
@@ -138,12 +149,9 @@ def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int, *, recor
                 check = tmp / 'check'
                 sh(repo, 'git', 'worktree', 'add', '-q', str(check), t['branch'] or f'aa/{tid}')
                 shutil.copytree(task_dir / 'hidden', check, dirs_exist_ok=True)
-                run = lambda pat: subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.',
-                                                  '-p', pat], cwd=check, capture_output=True, text=True, timeout=300)
-                h = run('test_hidden_*.py')
-                hidden = h.returncode == 0
-                hidden_all = run('test*.py').returncode == 0
-                (art / 'hidden_output.txt').write_text(h.stdout + h.stderr)
+                hidden, h_out = grade(check, 'test_hidden_*.py')
+                hidden_all, _ = grade(check, 'test*.py')
+                (art / 'hidden_output.txt').write_text(h_out)
                 (art / 'delivered.diff').write_text(sh(repo, 'git', 'diff', 'main', t['branch'] or f'aa/{tid}'))
             d = t['data']
             usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -1401,6 +1402,24 @@ class OracleValidationTests(unittest.TestCase):
         t = self.env.db.task(tid)
         self.assertNotEqual(t['status'], 'DONE')
         self.assertNotIn('oracle_dropped', [k for k, _ in self.events(tid)])
+
+
+class LabGradingTests(unittest.TestCase):
+    def test_hanging_hidden_test_is_a_failed_grade_not_a_crash(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+        import lab
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / 'tests').mkdir()
+            (tmp / 'tests' / '__init__.py').touch()
+            (tmp / 'tests' / 'test_hidden_loop.py').write_text(
+                'import unittest\nclass T(unittest.TestCase):\n    def test(self):\n        while True: pass\n')
+            (tmp / 'tests' / 'test_ok.py').write_text(
+                'import unittest\nclass T(unittest.TestCase):\n    def test(self): pass\n')
+            ok, out = lab.grade(tmp, 'test_hidden_*.py', timeout=2)
+            self.assertFalse(ok)
+            self.assertIn('timed out', out)
+            self.assertEqual(lab.grade(tmp, 'test_ok.py')[0], True)
 
 
 class ContextSelectionTests(unittest.TestCase):
