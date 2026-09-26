@@ -1080,8 +1080,6 @@ class WorkerTests(unittest.TestCase):
         self.assertIn('read-only', cmd)
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class FailureTriageTests(unittest.TestCase):
@@ -1846,3 +1844,96 @@ class HarnessOptStopTests(unittest.TestCase):
         workers.execute(LANES['opus_high'], 'oracle author', self.wt)
         settings = json.loads(commands[-1][commands[-1].index('--settings') + 1])
         self.assertNotIn('hooks', settings)
+
+
+class HarnessOptExperimentTests(unittest.TestCase):
+    def test_repeat_plan_is_paired_reproducible_and_unique(self):
+        from tools.ho01_round import build_plan
+        tasks=['a','b','c']
+        p=build_plan(tasks,['minimal','full'],3,123,'round1')
+        self.assertEqual(p,build_plan(tasks,['minimal','full'],3,123,'round1'))
+        self.assertEqual(p['task_runs'],18)
+        ids=[a['variant'] for b in p['blocks'] for a in b['arms']]
+        self.assertEqual(len(ids),len(set(ids)))
+        for block in p['blocks']:
+            self.assertEqual({a['policy'] for a in block['arms']},{'minimal','full'})
+        orders={tuple(a['policy'] for a in b['arms']) for b in p['blocks']}
+        self.assertEqual(len(orders),2)
+
+    def test_plan_rejects_unsafe_ids_unknown_policies_and_duplicates(self):
+        from tools.ho01_round import build_plan
+        for tasks,policies in [(['../escape'],['minimal','full']),(['a'],['minimal','secret']),
+                               (['a','a'],['minimal','full']),(['a'],['full','full'])]:
+            with self.assertRaises(ValueError):build_plan(tasks,policies,2,1,'test')
+
+    def test_source_fingerprint_excludes_results_but_detects_source_edits(self):
+        from tools.ho01_records import fingerprint
+        with tempfile.TemporaryDirectory() as d:
+            r=Path(d);(r/'aa').mkdir();(r/'aa/x.py').write_text('x=1')
+            old=fingerprint(r)
+            (r/'eval/lab/results').mkdir(parents=True);(r/'eval/lab/results/run.json').write_text('{}')
+            self.assertEqual(fingerprint(r),old)
+            (r/'aa/x.py').write_text('x=2');self.assertNotEqual(fingerprint(r),old)
+
+    def test_round_rejects_changed_source_and_tampered_flags(self):
+        from tools.ho01_round import build_plan,validate_plan
+        from tools.ho01_records import fingerprint
+        with tempfile.TemporaryDirectory() as d:
+            r=Path(d);t=r/'eval/lab/tasks/a';t.mkdir(parents=True);(t/'task.json').write_text('{}')
+            p=build_plan(['a'],['full','minimal'],1,1,'test');p['source_fingerprint']=fingerprint(r)
+            validate_plan(p,r)
+            p['blocks'][0]['arms'][0]['flags']['evil']={}
+            with self.assertRaises(ValueError):validate_plan(p,r)
+            p=build_plan(['a'],['full','minimal'],1,1,'test');p['source_fingerprint']=fingerprint(r)
+            (t/'task.json').write_text('{"changed":true}')
+            with self.assertRaises(ValueError):validate_plan(p,r)
+
+    def test_failed_calls_record_unknown_usage_without_swallowing_error(self):
+        from tools.lab import CallLog
+        class Worker:
+            def execute(self,*args,**kw):raise RuntimeError('worker crashed')
+        w=Worker();log=CallLog(w,record_v2=True)
+        with self.assertRaises(RuntimeError):w.execute(LANES['luna_low'],'prompt',Path('.'))
+        self.assertEqual(len(log.calls),1)
+        self.assertIsNone(log.calls[0]['usage'])
+        self.assertEqual(log.calls[0]['error_type'],'RuntimeError')
+
+    def test_receipt_ignores_state_paths_but_records_effective_policy(self):
+        from tools.ho01_records import receipt
+        with tempfile.TemporaryDirectory() as d:
+            r=Path(d);(r/'repo').mkdir();(r/'repo/x').write_text('base')
+            a=receipt(r,r,{}, {'paths':{'state_dir':'one'},'gate':True})
+            b=receipt(r,r,{}, {'paths':{'state_dir':'two'},'gate':True})
+            self.assertEqual(a['effective_config_without_paths_sha256'],b['effective_config_without_paths_sha256'])
+            c=receipt(r,r,{}, {'paths':{'state_dir':'two'},'gate':False})
+            self.assertNotEqual(a['effective_config_without_paths_sha256'],c['effective_config_without_paths_sha256'])
+            self.assertIsNone(a['source_sha'])
+
+    def test_record_export_and_replay_never_assign_unchosen_success(self):
+        from tools.ho01_records import save_records,replay
+        with tempfile.TemporaryDirectory() as d:
+            r=Path(d);db=DB(':memory:');self.addCleanup(db.conn.close)
+            db.decision('tier','t','state',{'bounded':'allowed'},None,'missing','bounded')
+            db.decision_outcome('t','tier','pass')
+            save_records(r/'art',db,[{'lane':'x','usage':None}],r/'state',{'schema_version':2})
+            records=[json.loads(l) for l in (r/'art/decisions.jsonl').read_text().splitlines()]
+            report=replay(records)[0]
+            self.assertFalse(report['proposed_in_recorded_menu'])
+            self.assertIsNone(report['counterfactual_outcome'])
+            self.assertEqual(report['deployment_replay'],'abstain_missing_live_state')
+            self.assertNotIn('pass',json.dumps(report))
+
+    def test_new_lab_tasks_pass_the_original_base_hidden_reference_contract(self):
+        import importlib.util
+        root=Path(__file__).resolve().parents[1]
+        spec=importlib.util.spec_from_file_location('ho01_import',root/'eval/lab/import_tasks.py')
+        mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+        raw=json.loads((root/'eval/lab/ho01-task-source.json').read_text())['result']
+        tasks=[json.loads(line) for line in raw.splitlines()]
+        self.assertEqual(len(tasks),8)
+        for task in tasks:
+            with self.subTest(task=task['id']):self.assertEqual(mod.validate(task),'')
+
+
+if __name__ == '__main__':
+    unittest.main()

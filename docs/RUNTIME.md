@@ -181,3 +181,20 @@ The retrieval benchmark now uses one seeded random stream per task. Earlier
 as a baseline. Commit-message retrieval measures localization, not end-to-end task
 success; its shuffled single-repository split is not an independent deployment
 holdout.
+
+### HO-01 repeatable lab rounds and evidence receipts
+
+See `eval/lab/HO01.md`. The experimental repeat runner is separate from the daemon:
+planning never starts a model, and explicit execution preserves every paired trial.
+`tools/lab.py --record-v2` captures source/config/task hashes, observed model names,
+failed-call/usage records, decider rows and Stop events. These are receipts, not
+new decision authority. Catastrophic-error usage can remain unknown; outer elapsed
+time and the unknown marker must be retained in analyses. Defaults without this
+lab flag retain the original behavior. New HO-01 runtime flags remain off.
+
+Current official Codex documentation also describes blocking Stop hooks and a
+trust-review mechanism for unmanaged hook definitions. This patch wires only the
+Claude session-scoped adapter. Verify the installed custom Codex version and trust
+contract before a separately flagged Codex adapter; do not assume it is limited
+to notifications or silently copy Claude configuration into it. Documentation:
+https://developers.openai.com/codex/hooks (checked 2026-09-26).

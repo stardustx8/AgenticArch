@@ -160,3 +160,17 @@ promotion/merge is introduced. Model-facing omission and repair text lives under
 `aa/prompts/`. Workstation experiments must establish provider compatibility and
 quality/cost tradeoffs; deterministic regression coverage alone cannot establish
 that a model produces better code.
+
+### HO-01 continuation: preserve trials before fitting policies
+
+The original JSONL data has no repeated task/variant pairs and does not pin runtime
+versions. Add an explicit lab-only recording mode and deterministic paired-round
+runner instead of training a router on these confounded labels. The eight new
+fixtures cover additional Python, SQLite, JavaScript and evidence-transformation
+contracts, but remain synthetic and optimizer-authored. Their references validate
+the grader mechanism, not the difficulty labels or model outcomes.
+
+Historical decision replay audits the recorded menu and abstains about live
+availability or unobserved outcomes. No historical final selection is smuggled in
+as an optimal label or fallback. Keep all runtime gate defaults unchanged pending
+repeated, held-out quality and resource measurements.

@@ -1,0 +1,6 @@
+{
+ "id": "h01c_javascript_rank",
+ "tier_hint": "bounded",
+ "prompt": "Implement rank(items) in rank.js. Return a NEW array sorted by finite numeric priority ascending. A missing, NaN, infinite, or non-number priority ranks after every finite number. Preserve input order for ties including invalid priorities. Do not mutate the input array or objects. Export via module.exports. Node.js is installed; Python tests only launch Node to check JavaScript behavior.",
+ "trap": "none"
+}

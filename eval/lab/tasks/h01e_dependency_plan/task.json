@@ -1,0 +1,6 @@
+{
+ "id": "h01e_dependency_plan",
+ "tier_hint": "medium_tough",
+ "prompt": "Fix plan(graph). graph maps each package name to an iterable of package names it depends on. Return all packages in a valid installation order. At every step choose the lexicographically smallest currently available package. Duplicate dependencies count once. Any missing dependency, self-cycle, or longer cycle raises ValueError. Empty graph returns []. Do not mutate graph or its collections.",
+ "trap": "none"
+}
