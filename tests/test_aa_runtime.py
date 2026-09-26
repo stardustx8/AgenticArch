@@ -61,6 +61,9 @@ class FakeWorkers(Workers):
         super().__init__(cfg, runner=None)
         self.script, self.calls = script, []
 
+    def local_available(self):
+        return bool(self.script.get('local'))
+
     def verify_billing(self, cli):
         if self.script.get('billing_error'):
             from aa.workers import BillingError
@@ -124,7 +127,7 @@ def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'
 
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True, oracle=False, best_of_2=False):
+                 triage=True, oracle=False, best_of_2=False, local=False):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -146,6 +149,7 @@ class Env:
             'failure_triage': {'enabled': triage},
             'oracle_tests': {'enabled': oracle},
             'best_of_2': {'enabled': best_of_2},
+            'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -1278,3 +1282,82 @@ class OracleValidationTests(unittest.TestCase):
         self.assertIsNone(t['case_id'])
         self.assertIn('oracle_dropped', [k for k, _ in self.events(tid)])
         self.assertNotIn('oracle_tests', t['data']['checks'])
+
+
+class LocalModelTests(unittest.TestCase):
+    """Gemma (local lane) as extra independent test writer and as neutral tie-breaker."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        self.env.close()
+        self._tmp.cleanup()
+
+    @staticmethod
+    def oracle_both(local_files):
+        def fn(lane, cwd, prompt, extra):
+            if lane.cli == 'local':
+                return Result(True, '{}', {'files': local_files, 'command': 'sh tests/check_indep.sh', 'notes': ''},
+                              [lane.model])
+            return oracle_writer()(lane, cwd, prompt, extra)
+        return fn
+
+    def test_single_lane_gets_extra_local_test_set(self):
+        files = [{'path': 'tests/check_indep.sh', 'content': 'test -f done.txt\n'},
+                 {'path': '../escape_test.sh', 'content': 'x'},
+                 {'path': 'tests/check_feature.sh', 'content': 'true\n'}]          # exists: must not overwrite
+        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'local': True,
+                                  'oracle': self.oracle_both(files)}, FakeCLM('bounded'), oracle=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(t['data']['oracle']['authors'], ['opus_medium', 'gemma_local'])
+        self.assertEqual(sorted(t['data']['oracle']['files']), ['tests/check_feature.sh', 'tests/check_indep.sh'])
+        self.assertIn('test -f done.txt', sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh'))
+        self.assertFalse((self.tmp / 'state' / 'worktrees' / 'escape_test.sh').exists())
+
+    def test_race_tests_written_by_local_model(self):
+        files = [{'path': 'tests/check_indep.sh', 'content': 'test -f done.txt\n'}]
+        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'work': write_done, 'local': True,
+                                  'oracle': self.oracle_both(files)}, FakeCLM('medium_tough'), oracle=True,
+                       best_of_2=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(t['data']['oracle']['authors'], ['gemma_local'])
+
+    def _split_env(self, tiebreak_pick):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text(f'{lane.name}' + (' long' * 20 if 'opus' in lane.name else ''))
+            return Result(True, 'done', None, [lane.model])
+
+        def pick(lane, cwd, prompt, extra):
+            if lane.cli == 'local':
+                return tiebreak_pick(prompt, lane)
+            mine = 'opus_high' if 'opus' in lane.name else 'astra_high'
+            other = 'astra_high' if mine == 'opus_high' else 'opus_high'
+            return Result(True, '', {'winner': 'A' if prompt.index(mine) < prompt.index(other) else 'B',
+                                     'reason': 'mine'}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': work, 'pick': pick, 'local': True},
+                       FakeCLM('medium_tough'), best_of_2=True, local=True)
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        return self.env.db.task(tid)
+
+    def test_split_panel_resolved_by_consistent_local_tiebreak(self):
+        def prefers_opus(prompt, lane):
+            a_opus = prompt.index('opus_high') < prompt.index('astra_high')
+            return Result(True, '', {'winner': 'A' if a_opus else 'B', 'reason': 'opus'}, [lane.model])
+        t = self._split_env(prefers_opus)
+        self.assertEqual(t['lane'], 'opus_high', 'consistent tie-break beats the smaller-diff default')
+        self.assertIn('tie-break by gemma_local', t['data']['race_winner']['reason'])
+
+    def test_position_biased_tiebreak_is_ignored(self):
+        always_a = lambda prompt, lane: Result(True, '', {'winner': 'A', 'reason': 'first'}, [lane.model])
+        t = self._split_env(always_a)
+        self.assertEqual(t['lane'], 'astra_high', 'inconsistent across orders -> smaller diff')
+        self.assertEqual(len(set(t['data']['tiebreak_votes'])), 2)

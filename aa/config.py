@@ -75,12 +75,21 @@ DEFAULTS: dict[str, Any] = {
         'poll_s': 60,
         'challengers': ['opus_high', 'astra_high'],
     },
+    'local_llm': {
+        # Loopback vLLM (deploy/systemd/aa-gemma.service): neutral third-family judge + test writer.
+        'enabled': True,
+        'url': 'http://127.0.0.1:8100',
+        'model': 'gemma-4-31b',
+        'timeout_s': 600,
+        'max_tokens': 8192,
+    },
     'oracle_tests': {
         # Independent acceptance tests before implementation (other vendor than the implementer),
         # must fail on the base commit, read-only for workers; mutation gate after checks pass.
         'enabled': True,
         'tiers': ['bounded', 'medium_tough'],
-        'author_for_race': 'luna_high',
+        'author_for_race': 'gemma_local',     # neutral for both racers; falls back to luna_high
+        'extra_author': 'gemma_local',        # single lane: additional independent test set
         'max_mutants': 12,
         'min_mutation_score': 0.5,
     },
@@ -90,6 +99,7 @@ DEFAULTS: dict[str, Any] = {
         'tiers': ['medium_tough'],
         'on_escalation': True,          # a Luna task that exhausted its retries races both
         'judge_lanes': ['opus_medium', 'astra_high'],   # both vendors judge; split -> tie-break
+        'tiebreak_lane': 'gemma_local',                  # neutral third family, judged in both orders
     },
     'failure_triage': {
         # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),

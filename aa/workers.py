@@ -35,6 +35,8 @@ LANES: dict[str, Lane] = {l.name: l for l in (
     Lane('astra_high', 'codex', 'gpt-6-astra', 'high', 2),
     Lane('opus_medium', 'claude', 'claude-opus-5-5', 'medium', 2),
     Lane('opus_high', 'claude', 'claude-opus-5-5', 'high', 2),
+    # Local model (loopback vLLM, no subscription): neutral judge and extra test writer only.
+    Lane('gemma_local', 'local', 'gemma-4-31b', 'n/a', 2),
 )}
 
 # Removed from every child process: any of these could switch a CLI to API billing
@@ -87,6 +89,7 @@ class Workers:
             raise ValueError(f'unknown workers.claude_guard {self.claude_guard!r}')
         self.codex = str(cfg.path('workers', 'codex'))
         self.claude = str(cfg.path('workers', 'claude'))
+        self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
         self.logs = cfg.logs
         self.run = runner
@@ -104,6 +107,10 @@ class Workers:
                 raise BillingError(f'cannot read Codex auth: {exc}') from exc
             if data.get('auth_mode') != 'chatgpt' or data.get('OPENAI_API_KEY'):
                 raise BillingError('Codex is not on ChatGPT subscription login')
+        elif cli == 'local':
+            if not self.local_available():
+                raise BillingError('local model server is not available')
+            return
         elif cli == 'claude':
             p = self.run([self.claude, 'auth', 'status'], capture_output=True, text=True,
                          env=child_env(), timeout=60, stdin=subprocess.DEVNULL)
@@ -128,6 +135,8 @@ class Workers:
         t0 = time.time()
         if lane.cli == 'codex':
             res = self._codex(lane, prompt, cwd, write, extra_dirs, schema, log)
+        elif lane.cli == 'local':
+            res = self._local(lane, prompt, schema, log)
         else:
             res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log)
         res.seconds = time.time() - t0
@@ -172,6 +181,38 @@ class Workers:
         ok = p.returncode == 0 and bool(text.strip()) and (schema is None or structured is not None)
         return Result(ok, text, structured, [lane.model] if ok else [], usage,
                       error='' if ok else (p.stderr[-2000:] or f'exit {p.returncode}'))
+
+    def local_available(self) -> bool:
+        if not self.local.get('enabled', True):
+            return False
+        import urllib.request
+        try:
+            with urllib.request.urlopen(self.local['url'].rstrip('/') + '/v1/models', timeout=3) as r:
+                return any(m.get('id') == self.local['model'] for m in json.load(r).get('data', []))
+        except (OSError, ValueError):
+            return False
+
+    def _local(self, lane, prompt, schema, log) -> Result:
+        """Loopback OpenAI-compatible chat call with schema-constrained output (no tools)."""
+        import urllib.request
+        body = {'model': self.local['model'], 'messages': [{'role': 'user', 'content': prompt}],
+                'temperature': 0.2, 'max_tokens': int(self.local.get('max_tokens', 8192))}
+        if schema is not None:
+            body['response_format'] = {'type': 'json_schema',
+                                       'json_schema': {'name': 'result', 'schema': schema, 'strict': True}}
+        req = urllib.request.Request(self.local['url'].rstrip('/') + '/v1/chat/completions',
+                                     data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=float(self.local.get('timeout_s', 600))) as r:
+                data = json.load(r)
+        except (OSError, ValueError) as exc:
+            return Result(False, '', error=f'local model error: {exc}')
+        text = (data.get('choices') or [{}])[0].get('message', {}).get('content') or ''
+        log.write_text(f'local {self.local["model"]}\n--- prompt\n{prompt[-4000:]}\n--- answer\n{text}')
+        structured = _json_or_none(text) if schema is not None else None
+        ok = bool(text.strip()) and (schema is None or structured is not None)
+        return Result(ok, text, structured, [self.local['model']] if ok else [], data.get('usage') or {},
+                      error='' if ok else 'local model returned no valid output')
 
     def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
         # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.

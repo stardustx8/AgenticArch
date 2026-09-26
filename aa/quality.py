@@ -83,35 +83,71 @@ class QualityMixin:
         repo = Path(t['repo'])
         wt = self.cfg.worktrees / f'{t["id"]}-oracle'
         git.add_worktree(repo, wt, f'aa/{t["id"]}-oracle', t['base_ref'])
-        author = (self.cfg['oracle_tests'].get('author_for_race', 'luna_high') if t['data'].get('mode') == 'race'
-                  else other_vendor(t['data'].get('planned_lane') or 'luna_high'))
-        tri = t['data'].get('triage') or {}
-        from .tasks import bullet, render
-        prompt = render('oracle.md', worktree=wt, prompt=t['prompt'],
-                        acceptance=bullet(tri.get('acceptance_criteria')),
-                        checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none)'),
-                        owner_answers=self._answers_text(t))
-        verdict, problem = None, ''
-        for attempt in (1, 2):                      # one repair round with the exact validation error
-            repair = (f'\nYour previous tests were rejected: {problem}\nFix them.\n' if problem else '')
-            try:
-                res = self.workers.execute(LANES[author], prompt + repair, wt, schema=ORACLE_SCHEMA,
-                                           log_name=f'{t["id"]}' + ('' if attempt == 1 else '-repair') + '-oracle')
-            except BillingError as exc:
-                self.db.event('oracle_skipped', t['id'], reason=f'billing: {exc}'[:300])
-                break
-            verdict, problem = self._validate_oracle(t, wt, res)
-            if verdict or not problem.startswith('invalid'):
-                break
-        if verdict:
-            t['data']['oracle'] = verdict
-            t['data']['checks'] = {**t['data'].get('checks', {}), 'oracle_tests': verdict['command']}
-            self.db.event('oracle_ready', t['id'], author=author, files=verdict['files'][:10])
+        accepted = []
+        for author in self._oracle_authors(t):
+            v = self._author_oracle(t, wt, author)
+            if v:
+                accepted.append((author, v))
+                self.db.event('oracle_ready', t['id'], author=author, files=v['files'][:10])
+        if accepted:
+            t['data']['oracle'] = {'files': [f for _, v in accepted for f in v['files']],
+                                   'command': ' && '.join(f'( {v["command"]} )' for _, v in accepted),
+                                   'commit': accepted[-1][1]['commit'], 'authors': [a for a, _ in accepted]}
+            t['data']['checks'] = {**t['data'].get('checks', {}), 'oracle_tests': t['data']['oracle']['command']}
         else:
             git.remove_worktree(repo, wt)
             git.git(repo, 'branch', '-D', f'aa/{t["id"]}-oracle', check=False)
         self.db.update_task(t['id'], data=t['data'])
         self._start_after_oracle(self.db.task(t['id']))
+
+    def _local_ok(self, lane: str) -> bool:
+        return LANES[lane].cli != 'local' or self.workers.local_available()
+
+    def _oracle_authors(self, t: dict) -> list[str]:
+        """Race: a neutral third family writes the tests. Single lane: the other vendor, plus the
+        local model as an additional independent test set."""
+        oc = self.cfg['oracle_tests']
+        if t['data'].get('mode') == 'race':
+            a = oc.get('author_for_race', 'luna_high')
+            return [a if self._local_ok(a) else 'luna_high']
+        authors = [other_vendor(t['data'].get('planned_lane') or 'luna_high')]
+        extra = oc.get('extra_author')
+        if extra and extra not in authors and self._local_ok(extra):
+            authors.append(extra)
+        return authors
+
+    def _author_oracle(self, t: dict, wt: Path, author: str) -> dict | None:
+        from .tasks import bullet, render
+        tri = t['data'].get('triage') or {}
+        local = LANES[author].cli == 'local'
+        if local:
+            prompt = render('oracle_local.md', prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
+                            context=_repo_context(wt, tri.get('relevant_paths') or []),
+                            owner_answers=self._answers_text(t))
+        else:
+            prompt = render('oracle.md', worktree=wt, prompt=t['prompt'],
+                            acceptance=bullet(tri.get('acceptance_criteria')),
+                            checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none)'),
+                            owner_answers=self._answers_text(t))
+        verdict, problem = None, ''
+        for attempt in (1, 2):                      # one repair round with the exact validation error
+            repair = (f'\nYour previous tests were rejected: {problem}\nFix them.\n' if problem else '')
+            try:
+                res = self.workers.execute(LANES[author], prompt + repair, wt,
+                                           schema=LOCAL_ORACLE_SCHEMA if local else ORACLE_SCHEMA,
+                                           log_name=f'{t["id"]}-{author}' + ('' if attempt == 1 else '-repair') + '-oracle')
+            except BillingError as exc:
+                self.db.event('oracle_skipped', t['id'], author=author, reason=f'billing: {exc}'[:300])
+                break
+            if local and res.ok and res.structured:
+                _write_local_tests(wt, res.structured.get('files') or [])
+            verdict, problem = self._validate_oracle(t, wt, res)
+            if verdict or not problem.startswith('invalid'):
+                break
+            git.discard(wt)                        # start the repair from the last accepted state
+        if not verdict:
+            git.discard(wt)
+        return verdict
 
     def _validate_oracle(self, t: dict, wt: Path, res) -> tuple[dict | None, str]:
         """Returns (oracle, '') or (None, reason). Reasons starting with 'invalid' allow one repair."""
@@ -338,9 +374,29 @@ class QualityMixin:
                 votes[judge] = (order[0] if res.structured['winner'] == 'A' else order[1],
                                 res.structured['reason'][:200])
         picks = {v[0] for v in votes.values()}
+        tb = self.cfg['best_of_2'].get('tiebreak_lane')
+        tb_picks = []
+        if not (len(votes) >= 2 and len(picks) == 1) and tb and self._local_ok(tb):
+            for o in (order, order[::-1]):              # both orders: only a consistent answer counts
+                p = render('pick.md', prompt=t['prompt'],
+                           acceptance=bullet((t['data'].get('triage') or {}).get('acceptance_criteria')),
+                           diff_a=diff(o[0]), diff_b=diff(o[1]))
+                try:
+                    r = self.workers.execute(LANES[tb], p, cands[o[0]], write=False, schema=PICK_SCHEMA,
+                                             log_name=f'{t["id"]}-pick-tiebreak')
+                except Exception as exc:
+                    self.db.event('pick_judge_error', t['id'], judge=tb, error=repr(exc)[:300])
+                    break
+                if r.ok and r.structured:
+                    tb_picks.append(o[0] if r.structured['winner'] == 'A' else o[1])
+            t['data']['tiebreak_votes'] = tb_picks
         if len(votes) >= 2 and len(picks) == 1:
             winner = picks.pop()
             reason = 'judges agree: ' + ' | '.join(f'{j}: {v[1]}' for j, v in votes.items())
+        elif len(tb_picks) == 2 and tb_picks[0] == tb_picks[1]:
+            winner = tb_picks[0]
+            reason = (f'judges split ({", ".join(f"{j}->{v[0]}" for j, v in votes.items())}); '
+                      f'tie-break by {tb}, consistent in both orders')
         else:
             sizes = {l: len(diff(l)) for l in lanes}
             winner = min(lanes, key=sizes.get)
@@ -459,3 +515,45 @@ def _mutants_for(path: Path, added: set[int]) -> list[tuple[int, int, int, str]]
                 continue
             break
     return out
+
+
+LOCAL_ORACLE_SCHEMA = {
+    'type': 'object', 'additionalProperties': False, 'required': ['files', 'command', 'notes'],
+    'properties': {
+        'files': {'type': 'array', 'items': {
+            'type': 'object', 'additionalProperties': False, 'required': ['path', 'content'],
+            'properties': {'path': {'type': 'string'}, 'content': {'type': 'string'}}}},
+        'command': {'type': 'string'}, 'notes': {'type': 'string'}},
+}
+
+
+def _write_local_tests(wt: Path, files: list[dict]) -> None:
+    """Write model-proposed test files: new files only, inside the worktree, test paths only."""
+    root = wt.resolve()
+    for f in files[:6]:
+        rel = str(f.get('path', '')).strip().lstrip('/')
+        target = (wt / rel).resolve()
+        if (not rel or '..' in Path(rel).parts or not str(target).startswith(str(root) + '/') or
+                target.exists() or not _is_test_path(rel)):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(f.get('content', '')))
+
+
+def _repo_context(wt: Path, relevant: list[str], budget: int = 24000) -> str:
+    """Relevant source files plus one existing test file as a convention example."""
+    parts, used = [], 0
+    tracked = git.git(wt, 'ls-files', check=False).splitlines()
+    example = next((p for p in tracked if _is_test_path(p) and p.endswith(SOURCE_EXT)), None)
+    for p in [*relevant[:6], *([example] if example else [])]:
+        path = wt / p
+        if not p or not path.is_file() or p in [x[0] for x in parts]:
+            continue
+        text = path.read_text(errors='replace')[:6000]
+        if used + len(text) > budget:
+            break
+        used += len(text)
+        parts.append((p, text))
+    listing = '\n'.join(tracked[:200])
+    return (f'All tracked files:\n{listing}\n\n' +
+            '\n\n'.join(f'--- {p}{" (example test)" if p == example else ""}\n{text}' for p, text in parts))
