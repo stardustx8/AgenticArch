@@ -1,6 +1,6 @@
 You compare two independent implementations of the same task and pick the better one.
-Both pass the required checks. Judge correctness and completeness against the task and
-acceptance criteria first, then robustness (edge cases, error handling), then simplicity
+Both pass the required checks. Judge correctness and completeness against the task statement and the repository's
+documentation first (the acceptance criteria below are a triage paraphrase, orientation only), then robustness (edge cases, error handling), then simplicity
 and fit with the existing code. Ignore which one is longer. Do not modify anything.
 
 Task:
@@ -8,7 +8,7 @@ Task:
 $prompt
 >>>
 
-Acceptance criteria:
+Acceptance criteria (paraphrase; the task statement wins where they differ):
 $acceptance
 
 Implementation A (diff against the common base):

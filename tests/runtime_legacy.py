@@ -80,11 +80,24 @@ class FakeWorkers(Workers):
             return Result(True, '', self.script['triage'], [lane.model])
         kind = _kind(log_name)
         if kind == 'spec' and 'spec' not in self.script:
-            return Result(True, '', spec_verdict([]), [lane.model])      # default: all criteria met
+            return Result(True, '', _complete_verdict(spec_verdict([]), prompt), [lane.model])   # all met
         if kind == 'pick' and 'pick' not in self.script:
             return Result(True, '', {'winner': 'A', 'reason': 'default'}, [lane.model])
         fn = self.script[kind]
-        return fn(lane, Path(cwd), prompt, extra_dirs)
+        res = fn(lane, Path(cwd), prompt, extra_dirs)
+        if kind == 'spec' and res.structured:
+            res.structured = _complete_verdict(res.structured, prompt)
+        return res
+
+
+def _complete_verdict(verdict: dict, prompt: str) -> dict:
+    import re as _re
+    n = max([int(m) for m in _re.findall(r'^(\d+)\. ', prompt.split('Acceptance criteria', 1)[-1], _re.M)] or [1])
+    have = {c.get('index') for c in verdict.get('criteria', [])}
+    if not have:
+        return verdict
+    extra = [{'index': i, 'criterion': 'auto', 'met': True, 'reason': 'ok'} for i in range(max(have) + 1, n + 1)]
+    return dict(verdict, criteria=list(verdict.get('criteria', [])) + extra)
 
 
 def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
@@ -434,7 +447,7 @@ class LocalFlowTests(unittest.TestCase):
         tid = self.env.app.tasks.create(self.env.target, 'add the widget')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        self.assertIn('fully implemented exactly as stated', prompts[0])
+        self.assertIn('does exactly what the task statement above asks, as written', prompts[0])
 
     def test_spec_judge_failure_blocks_after_retries(self):
         bad = lambda lane, cwd, prompt, extra: Result(False, '', None, [], error='timeout')

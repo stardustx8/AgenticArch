@@ -358,8 +358,21 @@ class QualityMixin:
         self.db.event('mutation_gate', t['id'], score=score, killed=killed, total=len(mutants))
         self.db.update_task(t['id'], data=t['data'])
 
+    def _record_contract_edits(self, t: dict, wt: Path) -> None:
+        """A worker that rewrites the specification to fit its code must not grade itself (lab diag3)."""
+        edits = contract_edits(wt, t['base_ref'], (t['data'].get('oracle') or {}).get('files', []))
+        t['data']['contract_edits'] = edits
+        if edits:
+            t['data']['contract_diff'] = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', '--', *edits, check=False)[:8000]
+            self.db.event('contract_edit', t['id'], files=edits[:10])
+
     def _quality_note_for_judge(self, t: dict) -> str:
         notes = []
+        if t['data'].get('contract_edits'):
+            notes.append('The worker changed these specification documents: ' + ', '.join(t['data']['contract_edits']) +
+                         '. Judge the delivery against the ORIGINAL text (the "-" lines below). An edit that narrows, '
+                         'weakens or removes a documented requirement makes the related criterion unmet unless the '
+                         'task explicitly asks for that change.\n```diff\n' + t['data'].get('contract_diff', '') + '\n```')
         m = t['data'].get('mutation') or {}
         if m.get('score') is not None and m['score'] < float(self.cfg['oracle_tests'].get('min_mutation_score', 0.5)):
             notes.append(f'The independent acceptance tests may be weak: they detected only {m["killed"]} of '
@@ -751,3 +764,18 @@ def diff_audit(wt: Path, start: str, oracle_files: list[str]) -> list[str]:
             if DEBUG_LINE.search(ln):
                 out.append(f'debug statement added in {f}: {ln[1:].strip()[:100]}')
     return out
+
+
+CONTRACT_DOC = re.compile(r'(^|/)(specs?|contracts?)/[^/]+\.(md|rst|txt|ya?ml|json)$|'
+                          r'(^|/)[^/]*(contract|spec|interface|requirement|api)[^/]*\.(md|rst|txt)$', re.I)
+
+
+def contract_edits(wt: Path, base: str, exclude=()) -> list[str]:
+    """Existing specification documents the change modified or deleted (new files are not edits)."""
+    out = git.git(wt, 'diff', '--name-status', f'{base}..HEAD', check=False)
+    edited = []
+    for line in out.splitlines():
+        parts = line.split('\t')
+        if len(parts) >= 2 and parts[0][:1] in ('M', 'D') and CONTRACT_DOC.search(parts[1]) and parts[1] not in exclude:
+            edited.append(parts[1])
+    return edited

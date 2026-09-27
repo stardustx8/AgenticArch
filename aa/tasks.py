@@ -85,6 +85,11 @@ SPEC_SCHEMA = {
 }
 
 
+TASK_AS_WRITTEN = ('The delivery does exactly what the task statement above asks, as written, and keeps every '
+                   'contract and documented behaviour of the repository that the task does not change (the '
+                   'criteria above may paraphrase or omit details).')
+
+
 def worker_report(res) -> dict:
     """Structured worker status; falls back to the legacy text markers when absent."""
     s = res.structured if isinstance(res.structured, dict) else None
@@ -436,6 +441,7 @@ class TaskFlow(QualityMixin):
             if failed is None:               # paused for the owner (environment problem)
                 return
         if not failed:
+            self._record_contract_edits(t, wt)
             self.db.update_task(t['id'], data=t['data'])     # persist check notes before the gate reloads
             self._mutation_gate(t, wt)
             t = self.db.task(t['id'])
@@ -551,9 +557,9 @@ class TaskFlow(QualityMixin):
         """Independent Opus review of every acceptance criterion against the committed diff."""
         sc = self.cfg['spec_check']
         wt = Path(t['worktree'])
-        # Without triage criteria (e.g. Codex triage failed) the task statement is the criterion.
-        criteria = ((t['data'].get('triage') or {}).get('acceptance_criteria') or
-                    ['The task is fully implemented exactly as stated above.'])
+        # Triage criteria are a paraphrase and can drop or invent details (lab diag2-4), so the task
+        # as written, together with the repository's own contracts, is always judged last.
+        criteria = list((t['data'].get('triage') or {}).get('acceptance_criteria') or []) + [TASK_AS_WRITTEN]
         diff = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', check=False)
         if self.cfg['harness_opt'].get('balanced_diffs', False):
             from .context import balanced_diff
@@ -657,6 +663,8 @@ class TaskFlow(QualityMixin):
             except git.GitError as exc:
                 pushed = f' (push failed: {exc})'
         result = f'branch {t["branch"]}{pushed}; commit {sha or "no changes"}'
+        if t['data'].get('contract_edits'):
+            result += '; changed specification docs (review them): ' + ', '.join(t['data']['contract_edits'])
         self.db.update_task(t['id'], status='DONE', result=result, data=t['data'])
         git.remove_worktree(Path(t['repo']), wt)
         git.remove_worktree(Path(t['repo']), self.cfg.state_dir / 'base-wt' / t['id'])
