@@ -129,6 +129,9 @@ def doctor(cfg) -> int:
         line('ntfy', True, cfg['ntfy']['url'])
     except OSError as exc:
         line('ntfy', False, str(exc))
+    fails = db.q("SELECT COUNT(*) AS n, MAX(detail) AS last FROM events WHERE kind='notify_failed' "
+                 "AND ts > ?", (time.time() - 86400,))[0]
+    line('ntfy deliveries (24 h)', not fails['n'], f"{fails['n']} failed; last: {fails['last']}" if fails['n'] else 'no failures')
     from . import git
     try:
         git.git(Path.home(), 'ls-remote', cfg['case_repo']['url'], timeout=30)

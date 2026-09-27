@@ -1590,3 +1590,65 @@ class IdeaFlagTests(unittest.TestCase):
         self.assertEqual(len(t['data']['attack']), 1)
         self.assertIn('adversarial test written by an independent model FAILS', p['spec'][0])
         self.assertFalse((self.env.cfg.worktrees / t['id'] / 'tests' / 'test_attack_x.py').exists())
+
+
+class NotifyFailureTests(unittest.TestCase):
+    """2026-09-27: ntfy answered HTTP 429 for hours and every push was lost unnoticed."""
+
+    def notifier(self):
+        from aa.notify import Notifier
+        cfg = config.load(Path('/nonexistent'), {'ntfy': {'enabled': True, 'url': 'http://127.0.0.1:9'}})
+        n = Notifier(cfg, DB(':memory:'))
+        n.retry_delay_s = 0
+        return n
+
+    @staticmethod
+    def http_error(code):
+        import urllib.error
+        return urllib.error.HTTPError('http://x', code, 'err', {}, None)
+
+    def test_transient_send_failure_is_retried_once(self):
+        n = self.notifier(); calls = []
+        class Ok:
+            def read(self): return b''
+        def urlopen(req, timeout):
+            calls.append(1)
+            if len(calls) == 1:
+                raise self.http_error(429)
+            return Ok()
+        with mock.patch('urllib.request.urlopen', urlopen):
+            n.send('t', 'm')
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(n.db.q("SELECT COUNT(*) AS c FROM events WHERE kind='notify_failed'")[0]['c'], 0)
+
+    def test_persistent_send_failure_is_recorded_with_title(self):
+        n = self.notifier()
+        def urlopen(req, timeout):
+            raise self.http_error(429)
+        with mock.patch('urllib.request.urlopen', urlopen), mock.patch('sys.stderr') as err:
+            n.send('Question from worker: t1', 'm')
+        row = n.db.q("SELECT detail FROM events WHERE kind='notify_failed'")
+        self.assertEqual(len(row), 1)
+        self.assertIn('Question from worker: t1', row[0]['detail'])
+        self.assertTrue(err.write.called)
+
+    def test_permanent_error_is_not_retried(self):
+        n = self.notifier(); calls = []
+        def urlopen(req, timeout):
+            calls.append(1); raise self.http_error(403)
+        with mock.patch('urllib.request.urlopen', urlopen), mock.patch('sys.stderr'):
+            n.send('t', 'm')
+        self.assertEqual(len(calls), 1)
+
+    def test_reply_poll_outage_is_logged_once_and_recovery_noted(self):
+        n = self.notifier()
+        def down(req, timeout):
+            raise OSError('connection refused')
+        class Ok:
+            def read(self): return b''
+        with mock.patch('urllib.request.urlopen', down), mock.patch('sys.stderr'):
+            n.poll_replies(); n.poll_replies(); n.poll_replies()
+        with mock.patch('urllib.request.urlopen', lambda req, timeout: Ok()):
+            n.poll_replies()
+        kinds = [r['kind'] for r in n.db.q("SELECT kind FROM events WHERE kind LIKE 'notify_poll%' ORDER BY id")]
+        self.assertEqual(kinds, ['notify_poll_failed', 'notify_poll_recovered'])
