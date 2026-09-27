@@ -4,7 +4,7 @@
 
 Maintain both packages on `main`, sharing the same core. Start integration with the existing custom Codex to preserve working state, auth and tools. Keep Pi as a serious alternative, evaluated on the owner's tasks rather than selected solely from a social claim. No API-credit execution or paid overflow is an implicit fallback.
 
-[HarnessTax](https://arena.ai/blog/coding-agents-harness-tax) supports testing lean harnesses, but not universal zero-loss savings. Its small sampled benchmark experiment prices tokens with an API rate card. It measures neither this project's new model versions nor subscription allowance. The exact relevant observations and limitations are recorded once in [the evidence registry](../config/research-evidence.json).
+[HarnessTax](https://arena.ai/blog/coding-agents-harness-tax) supports testing lean harnesses, but not universal zero-loss savings. Its small sampled benchmark experiment prices tokens with an API rate card. It measures neither this project's new model versions nor subscription allowance. The exact relevant observations and limitations are recorded once in [the evidence registry](../../config/research-evidence.json).
 
 The owner's quota correction is incorporated: unnecessary model work can reduce included coding capacity. [Codex guidance](https://developers.openai.com/codex/pricing/) explicitly recommends reducing prompts and tool context to extend usage. Nevertheless, quota can use provider-specific weights, windows or message counters. Cache reads, output, reasoning, retries and plan rules complicate the relationship. Optimize measured allowance, not an assumed API-dollar conversion.
 

@@ -1,6 +1,6 @@
 # Integration reference map
 
-The versioned [research registry](../config/research-evidence.json) contains canonical references and dated caveats. Follow the specific primary interface, not a social summary.
+The versioned [research registry](../../config/research-evidence.json) contains canonical references and dated caveats. Follow the specific primary interface, not a social summary.
 
 | Component | Reference | Qualification requirement |
 | --- | --- | --- |
