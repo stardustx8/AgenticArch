@@ -210,3 +210,11 @@ This validates mechanics and synthetic contracts, not real-worker superiority.
 Regression details, operating commands and limitations are in [HO02.md](HO02.md).
 Rollback: leave HO-01 flags false and do not invoke the new lab commands; production
 routing, subscription authentication and completion authority remain unchanged.
+
+## HO03-R314: validity before pipeline selection
+
+27 September 2026. The stopped project round revealed a task ceiling, unreachable escalation transport and automatic personal-memory injection. Keep production defaults unchanged. The next whole-pipeline comparison fixes both arms to the strong medium-tough baseline, removes asymmetric first-racer fault injection, and treats routing/handoff as a separate diagnostic. Its results cannot be pooled with earlier Luna-minimal trials or attributed to one verification gate.
+
+Native per-invocation memory controls preserve subscription authentication in place. Their implementation is opt-in and requires a version-bound native audit. Same-user read isolation is not claimed. Persistent deadlines include resumed downtime; preservation reports distinguish new damage, inherited taint and restoration; all hidden grading follows model work. Hard/ultra task labels remain hypotheses. Mechanical handoff completeness does not mean Pro has responded or approved implementation.
+
+The calibration block must pass privacy/evidence checks, a non-ceiling middle band, and a final upper-edge inspection before extension. Stop reasons cannot be overridden by a contradictory operator audit. Keep private research and customer data outside this public repository. Complete recovery-314 source is delivered by ordered format-patches when platform publication is blocked; local validation is never represented as CI on the partial public branch. See [HO03.md](HO03.md).

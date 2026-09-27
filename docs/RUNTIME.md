@@ -242,3 +242,7 @@ Unfinished calls, missing trials and absent reviews remain unknown. Seven separa
 `tools/ho02_report.py`; review files must identify a reviewer and exact snapshot.
 The validator checks structure, not the reviewer's independence or honesty.
 No automatic promotion follows from this small synthetic suite.
+
+## HO-03 recovery-314 experiment integration
+
+See [HO03.md](HO03.md) for the exact recovery-314 interface. Its native memory flag is `harness_opt.codex_no_memories` (default false), its primary mode is bounded with a fixed medium-tough Astra baseline, and its separate routing phase makes local awaiting-response handoffs. Persistent clocks, stage-local preservation attribution and deferred hidden grading support the opt-in lab. A source/configuration-bound calibration pauses at 2, 6 and 12 trajectories. Neither a failed calibration nor a locally complete handoff approves production changes. Native compatibility, privacy audits and whole-cgroup resource bounds remain mandatory. A separately recorded 319-test continuation uses a different interface; do not mix its commands or flags with these files.
