@@ -1,23 +1,9 @@
-# HO-03 delivery status
+# HO-03 delivery status: recovery-314
 
-27 September 2026. This branch contains the three upper-edge project builders and the integrated six-project catalog in `tools/ho03_projects.py`. They supply twelve validated stage contracts, not measured native-worker difficulty. The remaining tested integration is supplied in the HO-03 file and git-format-patch handoff because the worker-file write was blocked. It is not represented as already on this branch. Do not start the new native comparison from the partial branch alone.
+27 September 2026. The public base `5d88b3e4f9480d183dab0202ed194c07632346d8` contains the three ultra-hard builders and their six-project catalog. The complete integration is delivered as `HO03-recovery-314-complete.zip`, with every changed file, full source, validation and ordered git-format-patches, because the worker-file write was blocked. Do not start its native comparison from the partial public branch alone. No production defaults, authentication locations, completion authority or SESSION-HANDOFF changed.
 
-## Upper-edge projects
+The verified recovery-314 interface is [HO03.md](HO03.md). Its native memory flag is `harness_opt.codex_no_memories`; comparison is bounded with a fixed medium-tough Astra-high baseline; routing is a separate three-initial-intake diagnostic. A concurrent 319-test integration has a different interface and is preserved as separate private evidence. Its commands and fingerprints are not interchangeable with this recovery package.
 
-`u03_jobs`: durable tenant-scoped idempotent requests, lease expiry and fencing, then transactional outbox continuity, cancellation, migration and a reconnecting JavaScript reducer.
+The upper-edge projects are durable fenced jobs with transactional outbox and JavaScript reconnect handling; bitemporal reporting with exact monetary rounding and atomic replay; and safe journalled restore with rollback and external-edit preservation. Two independent middle probes and an explicitly exposed policy bridge complete the catalog. Twelve stage contracts validate locally; native task difficulty remains a prediction.
 
-`u03_temporal`: knowledge-time/revision/event-time selection without resurrecting voided records, then temporal joins, exact per-row monetary rounding and atomic cross-table replay.
-
-`u03_restore`: read-only safe planning and digest checks, then a durable journal, rollback at precommit failure points, external-edit conflict preservation and idempotent recovery.
-
-The catalog adds middle probes for source-grounded transcript claims and atomic incremental imports, plus an explicitly previously exposed policy bridge. All are synthetic. Local database/filesystem/reducer execution is real; native model calibration, remote-machine behavior, power-loss recovery and browser UX are not established by these fixtures.
-
-## Integrated handoff
-
-The supplied integration fixes unresolved-tier handling, stage-local protection attribution, persistent resume deadlines and hook-tamper auditing. It adds a fixed Astra-high minimal comparison against full race/gates, separately scored local awaiting-response escalation packages, source/configuration-pinned plans and mandatory operator calibration checks. Native memory controls use the existing subscription CLI configuration without credential relocation or permission changes. Actual installed-CLI behavior and log isolation require the operator preflight.
-
-Calibration pauses after 2, 6 and 12 trajectories. Its middle-band rule requires pooled stage correctness in [0.2,0.8] and at least one mixed project. Evidence defects, critical findings or protected-file loss stop regardless of a contradictory audit. An upper-only alternative may replace the still-unrun upper portion after a clean middle-band discrimination stop; it cannot bypass that stop to unlock extension.
-
-The integrated plan budgets 24 calibration stages, 84 extension stages and six separately scored routing stages. Middle/upper trajectories have 600/1200-second limits. Round caps are four/twelve/1.25 hours, with a three-hour, twelve-stage alternative upper diagnostic. These are caps, not promised durations or quota measurements. Whole-cgroup limits and private log audits remain mandatory.
-
-Production defaults and completion authority remain unchanged. `docs/SESSION-HANDOFF.md` is not edited. The private research report and final response carry exact source, patch and validation hashes, application instructions and open risks. No production gain, reliable difficulty boundary, installed-provider compatibility or independent model review is claimed from local mechanics alone.
+The calibration pauses at 2, 6 and 12 trajectories and has at most 24 stages. Accepted extension adds at most 84 stages. A separate twelve-stage upper-only diagnostic may replace a still-unrun upper block after a clean middle discrimination stop, but cannot unlock extension or bypass an evidence/critical failure. Routing has three initial intakes and no coding stages. Absolute caps are four hours for calibration, twelve for extension, three for upper-only and 1.25 for routing. Private native-version, memory, cgroup and trace audits are mandatory. All runtime and grader quality claims remain limited to their measured scope.
