@@ -157,6 +157,11 @@ class Workers:
             schema_file = log.with_suffix('.schema.json')
             schema_file.write_text(json.dumps(schema))
             cmd += ['--output-schema', str(schema_file)]
+        if self.harness_opt.get('codex_no_memories'):
+            # Native per-invocation controls: keep subscription auth in place.
+            # This suppresses automatic memory use/generation, not filesystem reads.
+            cmd += ['-c', 'features.memories=false', '-c', 'memories.use_memories=false',
+                    '-c', 'memories.generate_memories=false']
         cmd.append('-')
         try:
             p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),

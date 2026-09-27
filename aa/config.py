@@ -110,6 +110,7 @@ DEFAULTS: dict[str, Any] = {
     'harness_opt': {
         # Experimental; do not enable by default before paired workstation runs.
         'balanced_diffs': False, 'focused_failures': False, 'gate_shadow': False,
+        'codex_no_memories': False,
         'claude_stop_checks': False, 'stop_max_blocks': 2, 'stop_timeout_s': 60,
     },
     'ideas': {

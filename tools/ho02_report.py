@@ -54,7 +54,10 @@ def report(plan, root):
                 raise ValueError('claimed completion contradicts stage evidence')
             row['final']=sum(delivered)/n
             row['trajectory_final']=int(len(stages)==n and all(delivered))
-            row['protected_violations']=sum(s.get('final') is not None and not s['final']['protected_preserved'] for s in stages)
+            row['protected_violations']=sum(bool(s['final'].get('protected_changed_this_stage',
+                [] if s['final']['protected_preserved'] else ['legacy_unattributed'])) for s in stages if s.get('final'))
+            row['protected_tainted_stages']=sum(bool(s.get('final') and not s['final']['protected_preserved']) for s in stages)
+            row['protected_attribution_known']=all('protected_changed_this_stage' in s['final'] for s in stages if s.get('final'))
             for stage in stages:
                 review_file=path/f'review-stage-{stage["stage"]}.json'
                 if review_file.exists() and stage['final']:

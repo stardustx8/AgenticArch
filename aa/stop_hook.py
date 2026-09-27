@@ -114,11 +114,24 @@ def install(settings: dict, checks: dict, cwd: Path, root: Path, *, max_blocks: 
     import shlex
     # The trusted CLI argument verifies the copied executable before running it.
     # A self-check inside hook.py would be editable along with the code it checks.
-    loader = ("import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); b=p.read_bytes(); "
-              "ok=hashlib.sha256(b).hexdigest()==sys.argv[2]; "
-              "sys.argv=[str(p)]+sys.argv[3:]; "
-              "exec(compile(b,str(p),'exec'),{'__name__':'__main__','__file__':str(p)}) "
-              "if ok else print('{}')")
+    loader = "\n".join([
+        "import hashlib,json,pathlib,sys,time",
+        "p=pathlib.Path(sys.argv[1])",
+        "try:",
+        " b=p.read_bytes(); ok=hashlib.sha256(b).hexdigest()==sys.argv[2]",
+        "except OSError:",
+        " b=b''; ok=False",
+        "if not ok:",
+        " entry={'event':'hook_integrity_failed','ts':time.time()}",
+        " try:",
+        "  with (p.parent/'events.jsonl').open('a') as f: f.write(json.dumps(entry)+'\\n')",
+        " except OSError: pass",
+        " print('Stop hook integrity failed; coordinator verification remains required',file=sys.stderr)",
+        " print('{}')",
+        "else:",
+        " sys.argv=[str(p)]+sys.argv[3:]",
+        " exec(compile(b,str(p),'exec'),{'__name__':'__main__','__file__':str(p)})",
+    ])
     command = shlex.join([sys.executable, '-I', '-c', loader, str(capsule / 'hook.py'),
                           hashlib.sha256((capsule / 'hook.py').read_bytes()).hexdigest(),
                           '--policy', str(capsule / 'policy.json'), '--sha256', hashlib.sha256(data).hexdigest()])
