@@ -3,6 +3,11 @@
 Replies arrive either from ntfy action buttons (the phone POSTs a short command
 to the reply topic) or from `aa answer` on the workstation (written to the DB).
 Reply grammar, one line: `<verb> <id> <value...>`, e.g. `tier t0925-ab12c bounded`.
+
+Access control: the server denies anonymous access. `token_file` holds the daemon's token
+(write topic, read reply topic); `reply_token_file` holds the phone user's token, sent as the
+action buttons' Authorization header so a tap may post to the reply topic. A missing file
+means no header, which only works against a server without access control.
 """
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import json
 import sys
 import time
 import urllib.request
+from pathlib import Path
 from typing import Iterable
 
 from .config import Config
@@ -23,6 +29,11 @@ class Notifier:
         self.enabled = bool(n.get('enabled', True))
         self.url, self.public = n['url'].rstrip('/'), n['public_url'].rstrip('/')
         self.topic, self.reply_topic = n['topic'], n['reply_topic']
+        self.token = _read_token(n.get('token_file'))
+        self.reply_token = _read_token(n.get('reply_token_file'))
+
+    def _auth(self, token: str) -> dict[str, str]:
+        return {'Authorization': f'Bearer {token}'} if token else {}
 
     def send(self, title: str, message: str, *, choices: Iterable[tuple[str, str]] = (),
              priority: int = 3, tags: str = '') -> None:
@@ -32,7 +43,8 @@ class Notifier:
             print(f'[notify] {title}: {message}', file=sys.stderr)
             return
         actions = [{'action': 'http', 'label': label[:20], 'method': 'POST',
-                    'url': f'{self.public}/{self.reply_topic}', 'body': body, 'clear': True}
+                    'url': f'{self.public}/{self.reply_topic}', 'body': body, 'clear': True,
+                    **({'headers': self._auth(self.reply_token)} if self.reply_token else {})}
                    for label, body in list(choices)[:3]]
         body = {'topic': self.topic, 'title': title[:200], 'message': message[:3500],
                 'priority': priority}
@@ -41,7 +53,8 @@ class Notifier:
         if actions:
             body['actions'] = actions
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(),
-                                     headers={'Content-Type': 'application/json'}, method='POST')
+                                     headers={'Content-Type': 'application/json', **self._auth(self.token)},
+                                     method='POST')
         try:
             urllib.request.urlopen(req, timeout=10).read()
         except OSError as exc:  # Never let a notification failure stop the state machine.
@@ -57,7 +70,8 @@ class Notifier:
             self.db.kv_set('ntfy_since', since)
         url = f'{self.url}/{self.reply_topic}/json?poll=1&since={since}'
         try:
-            raw = urllib.request.urlopen(url, timeout=10).read().decode()
+            req = urllib.request.Request(url, headers=self._auth(self.token))
+            raw = urllib.request.urlopen(req, timeout=10).read().decode()
         except OSError:
             return []
         out = []
@@ -72,3 +86,12 @@ class Notifier:
             if msg.get('message'):
                 out.append(msg['message'].strip())
         return out
+
+
+def _read_token(path: str | None) -> str:
+    if not path:
+        return ''
+    try:
+        return Path(path).expanduser().read_text().strip()
+    except FileNotFoundError:
+        return ''

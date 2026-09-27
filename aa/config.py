@@ -24,6 +24,9 @@ DEFAULTS: dict[str, Any] = {
         'public_url': 'http://100.114.173.57:8093',
         'topic': 'agenticarch',
         'reply_topic': 'agenticarch-replies',
+        # Access tokens (mode 600): daemon token, and the phone user's token for action buttons.
+        'token_file': '~/.config/agenticarch/ntfy-token',
+        'reply_token_file': '~/.config/agenticarch/ntfy-reply-token',
         'enabled': True,
     },
     'decider': {

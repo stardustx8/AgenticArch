@@ -79,6 +79,11 @@ edit outside `cases/<id>/` or to the target snapshot is reverted and logged.
 
 - Phone: ntfy app, server `http://100.114.173.57:8093`, topic `agenticarch`. Buttons
   post replies to `agenticarch-replies`; the daemon reads them.
+- ntfy access control: `auth-default-access: deny-all`, users in `/etc/ntfy/user.db`.
+  `aa-daemon` (token in `~/.config/agenticarch/ntfy-token`) writes `agenticarch` and reads
+  `agenticarch-replies`; `phone` (password in the phone app, token in `ntfy-reply-token` for
+  the button headers) reads `agenticarch` and writes `agenticarch-replies`. Token files are
+  mode 600; a missing file sends no header and the server answers 403.
 - Workstation: `aa status`, `aa show <id>`, `aa prompt <case>`, `aa answer "<reply>"`.
 - Reply grammar: `tier <task> <tier>`, `checks <task> ok|none`, `answer <case> <text>`,
   `resume <case>`, `cancel <id>`, `retry <task>` (also: one more spec loop / re-run checks after
