@@ -59,7 +59,7 @@ Workers never get API keys (scrubbed env + auth-mode check before every dispatch
 ## Deep case flow
 
 ```text
-case/<id> branch in private stardustx8/GPT-Pro-Escalation, BRIEF.md + PRO-TURN-01.md
+case/<id> branch in private stardustx8/Dashboard, BRIEF.md + PRO-TURN-01.md
   -> ntfy: "Start a NEW Pro chat 'AA <id>', paste: <one line>"
   -> Pro (GitHub connector) writes SOLUTION.md, OBJECTIONS.md, turns/pro-01.md
   -> daemon polls the branch (60 s) -> Opus 5.5 high x Astra high challenge rounds

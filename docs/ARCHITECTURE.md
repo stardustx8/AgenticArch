@@ -14,7 +14,7 @@ owner (Codex desktop skill / aa CLI / ntfy buttons)
         aa daemon ── SQLite (tasks, cases, events, decisions, inbox)
        /    |     \
   CLM     workers   git: target repos (worktrees, aa/* branches)
- (local)  codex exec (Luna, Astra)      case repo GPT-Pro-Escalation (case/<id>)
+ (local)  codex exec (Luna, Astra)      case repo Dashboard (case/<id>)
           claude -p  (Opus 5.5)                   ^
                                                   | GitHub connector
                                           GPT-6 Pro in ChatGPT web

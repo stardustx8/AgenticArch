@@ -19,7 +19,7 @@ Read [protocol](references/protocol.md) for the full flow.
 2. Write the task as the owner stated it, plus concrete acceptance criteria and known
    constraints. Separate facts from assumptions; do not invent requirements.
 3. Queue it: `aa task --tier tough --repo <repo> "<task>"`.
-4. The coordinator creates `case/<id>` in the private repo `stardustx8/GPT-Pro-Escalation`
+4. The coordinator creates `case/<id>` in the private repo `stardustx8/Dashboard`
    with BRIEF.md and PRO-TURN-01.md and sends the owner an ntfy push with a one-line
    prompt. `aa prompt <case>` prints it again. The owner pastes it into a NEW Pro chat
    (connector on) named `AA <case>`, and every later turn into that SAME chat.

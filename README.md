@@ -27,7 +27,7 @@ aa doctor
 | Tough, architecture, research | GPT-6 Pro web drafts -> Opus 5.5 high x Astra high challenge -> Pro GO + implements |
 
 Remote execution is subscription-only (no API keys, no paid overflow). Deep cases live
-in the private repo `stardustx8/GPT-Pro-Escalation`; nothing private goes in this repo.
+in the private repo `stardustx8/Dashboard`; nothing private goes in this repo.
 
 ## Install (workstation)
 

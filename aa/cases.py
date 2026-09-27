@@ -45,7 +45,7 @@ class CaseFlow:
         if not git.git(d, 'rev-parse', '--verify', '--quiet', 'HEAD', check=False):
             # Empty remote: create main with the shared protocol.
             (d / 'PROTOCOL.md').write_text((Path(__file__).parent / 'prompts' / 'case_protocol.md').read_text())
-            (d / 'README.md').write_text('# GPT-Pro-Escalation\n\nPrivate AgenticArch deep cases. '
+            (d / 'README.md').write_text('# Dashboard\n\nPrivate AgenticArch deep cases. '
                                          'See PROTOCOL.md. One branch per case: `case/<id>`.\n')
             git.git(d, 'checkout', '-q', '-B', 'main')
             git.commit_all(d, 'Initialize AgenticArch case repository')

@@ -7,5 +7,5 @@ Read START-HERE.md, docs/SESSION-HANDOFF.md, docs/OWNER-REQUIREMENTS.md and docs
 - The coordinator (not a model) commits, runs checks and decides completion. Keep write scopes: worktree for workers, `cases/<id>/` for challengers.
 - CLM votes/ranks only; log every decision; never let it lower a floor or approve work.
 - Every behaviour change needs a test in `tests/test_aa_runtime.py` (fake workers, real git).
-- Deep-case content stays in the private repo stardustx8/GPT-Pro-Escalation.
+- Deep-case content stays in the private repo stardustx8/Dashboard.
 - Work on branches with a PR per milestone; no force-push; update the handoff at closeout.

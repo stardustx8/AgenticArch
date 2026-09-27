@@ -19,7 +19,7 @@ a day); manual one-line Pro prompts are acceptable.
 | O06 | Fable 5.1 dropped; Fable 5.5 replaces Opus as challenger after release and qualification. No gpt-6-sol/terra routes. | config deep.challengers |
 | O07 | Pro uses the ChatGPT GitHub connector (write verified by owner): reads the case branch, writes its turns, and after GO implements on a target-repo branch. No evidence ZIP. | aa/prompts/pro_*.md |
 | O08 | Owner is notified by self-hosted ntfy (Tailscale) with the one-line prompt and reply buttons. | aa/notify.py |
-| O09 | Cases live in the new private repo stardustx8/GPT-Pro-Escalation; AgenticArch stays public and case-free. | config case_repo |
+| O09 | Cases live in the new private repo stardustx8/Dashboard; AgenticArch stays public and case-free. | config case_repo |
 | O10 | After GO, local test failures are fixed by Opus high; design problems go back to Pro. | aa/cases.py |
 | O11 | No cross-model code-review loop for normal tasks. | aa/tasks.py |
 | O12 | Required checks: per-repo `.agenticarch.toml`, else autodetect confirmed once by the owner. | aa/checks.py |

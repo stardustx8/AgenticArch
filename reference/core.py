@@ -89,7 +89,7 @@ def validate_policy(policy: Mapping[str, Any]) -> None:
     )):
         raise ValueError('Verification guards cannot be disabled')
     debate = policy.get('debate', {})
-    if (debate.get('review_repository_name') != 'GPT-Pro-Escalation' or
+    if (debate.get('review_repository_name') != 'Dashboard' or
             set(debate.get('required_roles', [])) != {'pro', 'claude'} or
             debate.get('same_chat_for_pro') is not True or
             debate.get('matching_solution_digests') is not True or

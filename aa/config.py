@@ -15,8 +15,8 @@ DEFAULTS: dict[str, Any] = {
         'state_dir': '~/.local/share/agenticarch',
     },
     'case_repo': {
-        'url': 'git@github.com:stardustx8/GPT-Pro-Escalation.git',
-        'slug': 'stardustx8/GPT-Pro-Escalation',
+        'url': 'git@github.com:stardustx8/Dashboard.git',
+        'slug': 'stardustx8/Dashboard',
     },
     'ntfy': {
         'url': 'http://127.0.0.1:8093',

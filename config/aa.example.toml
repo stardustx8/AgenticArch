@@ -1,8 +1,8 @@
 # Copy to ~/.config/agenticarch/aa.toml. Every key is optional (defaults in aa/config.py).
 
 [case_repo]
-url = "git@github.com:stardustx8/GPT-Pro-Escalation.git"   # PRIVATE repo for deep cases
-slug = "stardustx8/GPT-Pro-Escalation"
+url = "git@github.com:stardustx8/Dashboard.git"   # PRIVATE repo for deep cases
+slug = "stardustx8/Dashboard"
 
 [ntfy]
 url = "http://127.0.0.1:8093"           # daemon -> ntfy (loopback)

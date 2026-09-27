@@ -17,7 +17,7 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
 
 ## Harness optimisation with GPT Pro (HO-01)
 
-- Private branch `research/harness-opt-01` of stardustx8/GPT-Pro-Escalation (local clone
+- Private branch `research/harness-opt-01` of stardustx8/Dashboard (local clone
   `~/dev/GPT-Pro-Escalation`): BRIEF.md, inputs, owner answers and work profile, Pro's
   REPORT/SCORING/EXPERIMENTS, reviews, results, turn files (`turns/PRO-TURN-NN.md`).
 - Pro's code: AgenticArch PR #3 (`pro/harness-opt-01`), draft, all new policies off by default.

@@ -24,7 +24,7 @@ debate, wants to steer it, or wants a round re-run.
 ## Steering
 
 - Inspect: `aa show <case>`; read the case branch `case/<id>` in
-  `stardustx8/GPT-Pro-Escalation` (turn files under `cases/<id>/turns/`).
+  `stardustx8/Dashboard` (turn files under `cases/<id>/turns/`).
 - Owner guidance or answers: `aa answer "answer <case> <text>"` (committed to
   OWNER-ANSWERS.md; starts the next cycle when the case waits or is paused).
 - Resume a paused case: `aa answer "resume <case>"`. Cancel: `aa answer "cancel <case>"`.
