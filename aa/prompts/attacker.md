@@ -8,6 +8,7 @@ $prompt
 >>>
 
 Acceptance criteria:
+(triage paraphrase; the task statement is authoritative where they differ)
 $acceptance
 
 Implementation (changed files after the change):

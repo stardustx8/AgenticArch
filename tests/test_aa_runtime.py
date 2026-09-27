@@ -78,11 +78,26 @@ class FakeWorkers(Workers):
             return Result(True, '', self.script['triage'], [lane.model])
         kind = _kind(log_name)
         if kind == 'spec' and 'spec' not in self.script:
-            return Result(True, '', spec_verdict([]), [lane.model])      # default: all criteria met
+            return Result(True, '', _complete_verdict(spec_verdict([]), prompt), [lane.model])   # all met
         if kind == 'pick' and 'pick' not in self.script:
             return Result(True, '', {'winner': 'A', 'reason': 'default'}, [lane.model])
         fn = self.script[kind]
-        return fn(lane, Path(cwd), prompt, extra_dirs)
+        res = fn(lane, Path(cwd), prompt, extra_dirs)
+        if kind == 'spec' and res.structured:
+            res.structured = _complete_verdict(res.structured, prompt)
+        return res
+
+
+def _complete_verdict(verdict: dict, prompt: str) -> dict:
+    """Scripted spec verdicts cover criterion 1; the coordinator always appends 'the task as written',
+    so unscripted indices are answered as met (a scripted verdict never has to know the count)."""
+    import re as _re
+    n = max([int(m) for m in _re.findall(r'^(\d+)\. ', prompt.split('Acceptance criteria', 1)[-1], _re.M)] or [1])
+    have = {c.get('index') for c in verdict.get('criteria', [])}
+    if not have:                 # an empty verdict stays empty: the coordinator must reject it
+        return verdict
+    extra = [{'index': i, 'criterion': 'auto', 'met': True, 'reason': 'ok'} for i in range(max(have) + 1, n + 1)]
+    return dict(verdict, criteria=list(verdict.get('criteria', [])) + extra)
 
 
 def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
@@ -432,7 +447,7 @@ class LocalFlowTests(unittest.TestCase):
         tid = self.env.app.tasks.create(self.env.target, 'add the widget')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        self.assertIn('fully implemented exactly as stated', prompts[0])
+        self.assertIn('does exactly what the task statement above asks, as written', prompts[0])
 
     def test_spec_judge_failure_blocks_after_retries(self):
         bad = lambda lane, cwd, prompt, extra: Result(False, '', None, [], error='timeout')
@@ -1590,3 +1605,102 @@ class IdeaFlagTests(unittest.TestCase):
         self.assertEqual(len(t['data']['attack']), 1)
         self.assertIn('adversarial test written by an independent model FAILS', p['spec'][0])
         self.assertFalse((self.env.cfg.worktrees / t['id'] / 'tests' / 'test_attack_x.py').exists())
+
+
+class RequestAuthoritativeTests(unittest.TestCase):
+    """Lab diag2-4 (2026-09-27): triage paraphrases in the worker prompt dropped a contract detail
+    ('every row carries restated: bool') and workers rewrote the contract to fit; without them the
+    in-harness worker matched the raw model (8/8 vs 1/8)."""
+
+    CRIT = 'CRIT-XYZ marks only restated months'
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def tri(self, **kw):
+        return dict(triage('bounded', testable=True), acceptance_criteria=[self.CRIT], **kw)
+
+    def test_worker_gets_request_as_authority_and_no_triage_criteria(self):
+        prompts = []
+        def work(lane, cwd, prompt, extra):
+            prompts.append(prompt); return write_done(lane, cwd, prompt, extra)
+        self.env = Env(self.tmp, {'triage': self.tri(), 'work': work}, FakeCLM('bounded'))
+        self.env.app.tasks.create(self.env.target, 'add the widget exactly as documented')
+        self.env.run()
+        self.assertIn("The owner's request (authoritative)", prompts[0])
+        self.assertIn('add the widget exactly as documented', prompts[0])
+        self.assertNotIn(self.CRIT, prompts[0])
+        self.assertIn('not a limit on what to read', prompts[0])
+
+    def test_oracle_authors_get_no_triage_criteria(self):
+        seen = []
+        def oracle(lane, cwd, prompt, extra):
+            seen.append(prompt); return oracle_writer()(lane, cwd, prompt, extra)
+        self.env = Env(self.tmp, {'triage': self.tri(), 'work': write_done, 'oracle': oracle},
+                       FakeCLM('bounded'), oracle=True)
+        self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        self.assertTrue(seen)
+        self.assertTrue(all(self.CRIT not in p for p in seen))
+
+    def test_spec_judge_always_judges_the_task_as_written_last(self):
+        from aa.tasks import TASK_AS_WRITTEN
+        prompts = []
+        def spec(lane, cwd, prompt, extra):
+            prompts.append(prompt); return Result(True, '', spec_verdict([]), [lane.model])
+        self.env = Env(self.tmp, {'triage': self.tri(), 'work': write_done, 'spec': spec}, FakeCLM('bounded'))
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        self.assertIn(f'1. {self.CRIT}', prompts[0])
+        self.assertIn(f'2. {TASK_AS_WRITTEN}', prompts[0])
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+
+    def test_triage_prompt_forbids_invented_requirements(self):
+        from aa.tasks import render
+        text = render('triage.md', repo='r', prompt='p', owner_answers='')
+        self.assertIn('Never add requirements, policies or decisions the task does not ask for', text)
+        self.assertIn('Keep exact names, keys, values and scope words', text)
+
+    def _contract_env(self, edit):
+        self.env = Env(self.tmp, {'triage': self.tri(), 'work': edit, 'spec': self.spec}, FakeCLM('bounded'))
+        (self.env.target / 'docs').mkdir()
+        (self.env.target / 'docs' / 'contracts.md').write_text('Rows carry `restated: bool`.\n')
+        (self.env.target / 'docs' / 'handoff.md').write_text('notes\n')
+        sh(self.env.target, 'git', 'add', '-A'); sh(self.env.target, 'git', 'commit', '-qm', 'docs')
+        return self.env.app.tasks.create(self.env.target, 'feature')
+
+    def spec(self, lane, cwd, prompt, extra):
+        self.spec_prompts.append(prompt); return Result(True, '', spec_verdict([]), [lane.model])
+
+    def test_rewritten_contract_is_flagged_and_judged_against_the_original(self):
+        self.spec_prompts = []
+        def edit(lane, cwd, prompt, extra):
+            (cwd / 'docs' / 'contracts.md').write_text('Only restated months carry `restated: true`.\n')
+            return write_done(lane, cwd, prompt, extra)
+        tid = self._contract_env(edit)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['data']['contract_edits'], ['docs/contracts.md'])
+        self.assertIn('Judge the delivery against the ORIGINAL text', self.spec_prompts[0])
+        self.assertIn('-Rows carry `restated: bool`.', self.spec_prompts[0])
+        self.assertIn('changed specification docs (review them): docs/contracts.md', t['result'])
+        self.assertIn('contract_edit', [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE task_id=?', (tid,))])
+
+    def test_new_docs_and_handoff_notes_are_not_contract_edits(self):
+        self.spec_prompts = []
+        def edit(lane, cwd, prompt, extra):
+            (cwd / 'docs' / 'handoff.md').write_text('notes\nchanged X\n')
+            (cwd / 'docs' / 'new-api-spec.md').write_text('new\n')
+            return write_done(lane, cwd, prompt, extra)
+        tid = self._contract_env(edit)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['data']['contract_edits'], [])
+        self.assertNotIn('ORIGINAL text', self.spec_prompts[0])
+        self.assertNotIn('changed specification docs', t['result'])

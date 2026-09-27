@@ -34,6 +34,8 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
      checks decide, two-vendor judge panel when both pass (split -> Gemma in both orders,
      inconsistent -> smaller diff)
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
+     (worker prompt: the owner's request is authoritative, repo docs/contracts define done,
+      no triage criteria - D023; edits to existing spec/contract docs are flagged)
      fail -> failure triage per failed check:
        passes on rerun: FLAKY (noted) | SemIf says environment: pause + ntfy Retry/Treat as code/Cancel
        same failure on the base commit: PRE_EXISTING (spec judge told) | else CODE:

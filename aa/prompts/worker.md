@@ -2,15 +2,17 @@ You are implementing a task in the git worktree at $worktree (branch $branch).
 Work only inside this worktree. Do not commit, push, or change git configuration;
 the coordinator commits and runs the checks itself.
 
-Task:
+The owner's request (authoritative):
 <<<
 $prompt
 >>>
 
-Acceptance criteria:
-$acceptance
+What is required is defined by the request above together with the repository's own
+documentation, contracts and existing tests. Read the relevant ones yourself before you
+change code, and follow them exactly.
 
-Start by reading: $paths
+
+Possibly useful starting points (not a limit on what to read): $paths
 
 Required checks the coordinator will run afterwards (make them pass; run them yourself
 where possible):
@@ -26,6 +28,6 @@ Your final answer is the JSON object required by the output schema:
 - question: your question for the owner (empty unless blocked).
 - rebuttals: if a reviewer finding is wrong, one entry per finding citing the file and
   lines that already satisfy it (empty otherwise).
-- spec_conflicts: contradictions you found between the task, the acceptance criteria and the
-  tests (empty if none).
+- spec_conflicts: contradictions you found between the request, the repository, the triage
+  notes and the tests (empty if none).
 $owner_answers

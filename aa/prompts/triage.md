@@ -24,7 +24,10 @@ owner_question: if the task cannot be done correctly without a fact, value, acce
 decision that only the owner can provide (and that is not in the repository), ask for it here
 precisely, with options when useful; judge the tier as if the answer were given. Otherwise "".
 $owner_answers
-acceptance_criteria: concrete, checkable statements of done.
+acceptance_criteria: concrete, checkable statements of done that restate ONLY what the task or the
+repository requires. Keep exact names, keys, values and scope words (every, all, each, none).
+Never add requirements, policies or decisions the task does not ask for; put uncertainties
+under risks instead.
 relevant_paths: up to 15 existing repo paths most relevant to the task.
 summary: two or three sentences a senior engineer would need to start.
 testable: true if the task changes observable behaviour that automated tests can verify
