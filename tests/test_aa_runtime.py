@@ -203,15 +203,80 @@ class HO02ProjectGuardTests(unittest.TestCase):
             stages=[]
             for i in (1,2):
                 grade={'sha':str(i),'hidden_pass':True,'all_tests_pass':True,'protected_preserved':True}
-                stages.append({'stage':i,'first':grade,'final':grade,'correct_delivery':True})
+                stages.append({'stage':i,'status':'DONE','first':grade,'final':grade,'correct_delivery':True})
                 r=rubric(str(i));r['reviewer']='fixture-reviewer'
                 r['dimensions']={k:{'value':2 if k=='handoff' else 3,'evidence':'inspected fixture'} for k in r['dimensions']}
                 r['critical']={k:{'value':k=='fabricated_verification' and i==2,'evidence':'inspected fixture'} for k in r['critical']}
                 atomic(path/f'review-stage-{i}.json',r)
             atomic(path/'result.json',dict(project=t['project'],policy=t['policy'],stages=stages))
-            atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],mode=p['mode']))
+            from tools.ho02_projects import catalog
+            from tools.ho02_support import digest
+            from tools.ho01_round import POLICIES
+            project=next(x for x in catalog() if x['id']==t['project'])
+            atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],mode=p['mode'],
+                policy=t['policy'],flags=POLICIES[t['policy']],project_hash=digest(project),
+                effective_config_sha256=p['effective_config_hashes'][t['policy']]))
             row=report(p,root)['rows'][0]
             self.assertEqual(row['dimensions']['handoff'],2)
             self.assertEqual(row['critical_by_type']['fabricated_verification'],1)
             self.assertTrue(row['review_coverage'])
             self.assertEqual(row['final'],1)
+
+
+class HO02ReceiptIntegrityTests(unittest.TestCase):
+    def fixture(self,root):
+        from tools.ho02_round import plan
+        from tools.ho02_projects import catalog
+        from tools.ho02_support import atomic,digest
+        from tools.ho01_round import POLICIES
+        p=plan('receipt-check',1); t=p['trials'][0]; path=root/t['id'];path.mkdir()
+        project=next(x for x in catalog() if x['id']==t['project'])
+        atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],mode=p['mode'],
+            policy=t['policy'],flags=POLICIES[t['policy']],project_hash=digest(project),
+            effective_config_sha256=p['effective_config_hashes'][t['policy']]))
+        grade=dict(sha='observed',hidden_pass=True,all_tests_pass=True,protected_preserved=True)
+        result=dict(project=t['project'],policy=t['policy'],stages=[dict(stage=1,status='DONE',
+            first=None,final=grade,correct_delivery=True),dict(stage=2,status='BLOCKED',
+            first=None,final=None,correct_delivery=False)])
+        atomic(path/'result.json',result)
+        return p,path,result
+
+    def test_absent_first_is_unknown_and_partial_trajectory_is_not_complete(self):
+        from tools.ho02_report import report
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);p,path,r=self.fixture(root)
+            row=report(p,root)['rows'][0]
+            self.assertIsNone(row['first']);self.assertEqual(row['first_bounds'],[0,1])
+            self.assertEqual(row['first_coverage'],0)
+            self.assertEqual(row['final'],.5);self.assertEqual(row['trajectory_final'],0)
+
+    def test_duplicate_stages_and_forged_done_are_rejected(self):
+        from tools.ho02_report import report
+        from tools.ho02_support import atomic
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);p,path,r=self.fixture(root)
+            r['stages'][0]['status']='BLOCKED';atomic(path/'result.json',r)
+            with self.assertRaises(ValueError):report(p,root)
+            r['stages'][0]['status']='DONE';r['stages'][1]['stage']=1;atomic(path/'result.json',r)
+            with self.assertRaises(ValueError):report(p,root)
+
+    def test_foreign_project_and_duplicate_plan_cannot_count_twice(self):
+        from tools.ho02_report import report
+        from tools.ho02_support import atomic
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);p,path,r=self.fixture(root)
+            manifest=json.loads((path/'manifest.json').read_text());manifest['project_hash']='foreign'
+            atomic(path/'manifest.json',manifest)
+            with self.assertRaises(ValueError):report(p,root)
+            p['trials'][1]=dict(p['trials'][0])
+            with self.assertRaises(ValueError):report(p,root)
+
+    def test_effective_configuration_is_pinned_without_state_path(self):
+        from tools.ho02_project_run import effective_config,config_hash
+        from tools.ho02_round import plan,validate
+        from unittest.mock import patch
+        from aa import config
+        self.assertEqual(config_hash(effective_config('full','one')),config_hash(effective_config('full','two')))
+        p=plan('config-pin',1)
+        with patch.dict(config.DEFAULTS['retry'],max_model_calls=7):
+            with self.assertRaises(ValueError):validate(p)

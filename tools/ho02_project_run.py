@@ -42,6 +42,16 @@ def snapshot_grade(repo, sha, hidden, target, protected):
     finally: git(repo,'worktree','remove','--force',str(check))
 
 
+def effective_config(policy, state):
+    overrides={'paths':{'state_dir':str(state)},'ntfy':{'enabled':False},'delivery':{'push_branch':False}}
+    for section,values in POLICIES[policy].items(): overrides.setdefault(section,{}).update(values)
+    return config.load(overrides=overrides)
+
+
+def config_hash(cfg):
+    return digest({k:v for k,v in cfg.data.items() if k!='paths'})
+
+
 def run_project(project, dest, policy, mode='routed', *, resume=False, timeout=1800, worker_factory=None):
     dest=Path(dest).resolve()
     if dest.is_relative_to(ROOT): raise ValueError('private run evidence must be outside the public repository')
@@ -50,10 +60,11 @@ def run_project(project, dest, policy, mode='routed', *, resume=False, timeout=1
     dest.mkdir(parents=True,exist_ok=True)
     with (dest/'lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        identity={'schema_version':1,'project_hash':digest(project),'source_fingerprint':fingerprint(ROOT),
+        cfg=effective_config(policy,dest/'state')
+        identity={'schema_version':2,'effective_config_sha256':config_hash(cfg),'project_hash':digest(project),'source_fingerprint':fingerprint(ROOT),
                   'policy':policy,'flags':POLICIES[policy],'mode':mode}
         manifest=dest/'manifest.json'; progress_file=dest/'progress.json'; journal=dest/'events.jsonl'
-        if manifest.exists() and json.loads(manifest.read_text())!=identity: raise ValueError('changed source, project, flags or mode')
+        if manifest.exists() and json.loads(manifest.read_text())!=identity: raise ValueError('changed source, project, effective configuration, flags or mode')
         if not manifest.exists(): atomic(manifest,identity)
         if (dest/'result.json').exists(): return json.loads((dest/'result.json').read_text())
         progress=json.loads(progress_file.read_text()) if progress_file.exists() else {'stage':0,'completed':[],'fault_used':False,'restarted':False,'first':None,'tid':None}
@@ -64,9 +75,7 @@ def run_project(project, dest, policy, mode='routed', *, resume=False, timeout=1
             (repo/'.agenticarch.toml').write_text('[checks]\ntests = "python3 -m unittest discover -s tests -t . -q"\n')
             git(repo,'init','-q','-b','main'); git(repo,'config','user.name','project-lab');git(repo,'config','user.email','lab@invalid')
             git(repo,'add','-A'); git(repo,'commit','-qm','synthetic existing project')
-        overrides={'paths':{'state_dir':str(dest/'state')},'ntfy':{'enabled':False},'delivery':{'push_branch':False}}
-        for section,values in POLICIES[policy].items(): overrides.setdefault(section,{}).update(values)
-        cfg=config.load(overrides=overrides); db=DB(dest/'state/aa.sqlite')
+        db=DB(dest/'state/aa.sqlite')
         answer_count=0; fault_lock=threading.Lock()
         def make_app():
             workers=worker_factory(cfg) if worker_factory else Workers(cfg)

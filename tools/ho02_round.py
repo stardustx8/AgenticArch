@@ -8,7 +8,7 @@ from tools.ho01_records import fingerprint
 from tools.ho01_round import safe_id, POLICIES
 from tools.ho02_projects import catalog
 from tools.ho02_support import atomic, digest, event, validate_review
-from tools.ho02_project_run import run_project
+from tools.ho02_project_run import run_project, effective_config, config_hash
 
 
 def plan(name, repeats=5, seed=260927, mode='routed'):
@@ -20,10 +20,11 @@ def plan(name, repeats=5, seed=260927, mode='routed'):
         for p in shuffled:
             arms=['minimal','full'];rng.shuffle(arms)
             for arm in arms: trials.append({'id':f'{name}-{repeat:02d}-{p["id"]}-{arm}', 'project':p['id'],'policy':arm,'repeat':repeat})
-    return {'schema_version':1,'name':name,'repeats':repeats,'seed':seed,'mode':mode,'trials':trials,
+    return {'schema_version':2,'name':name,'repeats':repeats,'seed':seed,'mode':mode,'trials':trials,
         'maximum_task_runs':sum(len(p['stages']) for p in ps)*2*repeats,
         'catalog_sha256':digest(ps),'source_fingerprint':fingerprint(ROOT),
-        'policy_hashes':{p:digest(POLICIES[p]) for p in ('minimal','full')}}
+        'policy_hashes':{p:digest(POLICIES[p]) for p in ('minimal','full')},
+        'effective_config_hashes':{p:config_hash(effective_config(p,'unused-state')) for p in ('minimal','full')}}
 
 
 def validate(plan_data):
