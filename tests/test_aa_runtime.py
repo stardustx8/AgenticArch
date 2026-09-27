@@ -491,7 +491,9 @@ class HO03CalibrationTests(unittest.TestCase):
         from tools.ho02_project_run import run_project
         from tools.ho02_projects import catalog
         def factory(cfg):return FakeWorkers(cfg,{'triage':None})
-        with tempfile.TemporaryDirectory() as tmp:
+        # Both triages must fail: keep a live local SemIf service on the host from voting.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp, patch('aa.semif.SemIf.available', return_value=False):
             r=run_project(catalog()[0],Path(tmp)/'trial','minimal',worker_factory=factory)
             self.assertEqual(r['stages'][0]['status'],'WAIT_OWNER')
             self.assertIsNone(r['stages'][0]['task']['tier'])
