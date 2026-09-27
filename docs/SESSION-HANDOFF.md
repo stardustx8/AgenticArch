@@ -35,6 +35,25 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   the worktree under `systemd-run --user -p MemoryMax=48G -p OOMPolicy=continue`, push results
   to `results/<round>/`, write `turns/PRO-TURN-NN.md`, give the owner the one-line prompt.
 
+## 2026-09-27/28: no-harness baseline and the worker-prompt finding
+
+- Ultra-hard lab projects (branch `owner/ultra-projects`: revenue, pipeline, backup, sync): simple
+  pipeline 4/6 + 2/2 sync, full 5/6 + 2/2, plain `codex exec` Astra high (no harness) 8/8.
+- Diagnosis (results/diag-r1..diag4 in the private repo): the triage-paraphrased acceptance criteria in
+  the worker prompt caused the in-harness misses (and workers rewrote the contract to fit). On
+  identical code: original prompt 1/8, criteria as hints 6/8, no criteria 8/8 = raw.
+- Decided and built: D023 (PR #4, `owner/request-authoritative`): request authoritative, no triage
+  criteria in worker/oracle prompts, spec judge always judges the task as written, triage never invents
+  requirements, contract-edit guard. Separate fix PR #5 (`owner/notify-failures`): ntfy retries and
+  visible failures. Neither is merged; the owner merges.
+- Overnight: confirmation runs `u04-confirm-r1` (simple + D023, 4 projects x 2) and
+  `u04-confirm-full-r1` (full + D023, x 1) from `~/dev/AgenticArch-ultra` branch `owner/ultra-confirm`.
+- Lab tooling: `~/ho04-private` (round scripts, notify.py with delivery check, monitors). ntfy: phone
+  user `phone` (read agenticarch, write agenticarch-replies); the lab listens on the reply topic for
+  messages starting `lab:`. ntfy rate-limit exemption for 127.0.0.1 and the Docker gateway 172.17.0.1.
+- Recommendation pending the owner: simple pipeline as default (full doubles time for no measured gain
+  after D023 - to be confirmed by the overnight runs); then local-model rounds (quota) and Pro turn 04.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).
