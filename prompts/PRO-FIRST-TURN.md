@@ -6,7 +6,7 @@ Case: {{CASE_ID}}
 Turn: {{TURN_ID}}
 Review epoch: {{REVIEW_EPOCH}}
 Selected Claude model: {{CLAUDE_MODEL_ID}}, high effort
-Review repository: {{REVIEW_REPO}} (repository name must be `GPT-Pro-Escalation`)
+Review repository: {{REVIEW_REPO}} (repository name must be `Dashboard`)
 Branch: {{CASE_BRANCH}}
 Case directory: {{CASE_PATH}}
 Expected input commit: {{INPUT_COMMIT}}

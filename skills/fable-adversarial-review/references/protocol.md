@@ -4,7 +4,7 @@ Version 2. The original local coordinator may be Codex or Pi. The deep anchor is
 
 ## Identity and storage
 
-Use `GPT-Pro-Escalation`, one `case/<case-id>` branch and `cases/<case-id>/` directory. Keep task/session IDs, exact Pro chat binding, Claude worker binding and auth state in private coordinator storage. Use one active coordinator and one serialized writer for the case. Repository name alone does not grant write or export permission.
+Use `Dashboard`, one `case/<case-id>` branch and `cases/<case-id>/` directory. Keep task/session IDs, exact Pro chat binding, Claude worker binding and auth state in private coordinator storage. Use one active coordinator and one serialized writer for the case. Repository name alone does not grant write or export permission.
 
 The case record binds requirements, evidence-bundle and solution digests; a review epoch; selected Claude model; original task/harness; permitted operations; and the accepted input Git commit. Credentials, browser profiles and private chat URLs do not enter a public repository or model bundle.
 

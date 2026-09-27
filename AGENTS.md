@@ -14,7 +14,7 @@ Effort may change only before a generation, with bounded leases and effective-se
 
 ## Review and authority
 
-Keep both existing skill identifiers. Use actual participants, immutable turn records, append-only dialogue and same-digest approvals in `GPT-Pro-Escalation`. Keep the same Pro chat throughout the case. Freeze Claude identity per review epoch; changing it invalidates approvals and requires a fresh challenge/response, while preserving old objections. The original Codex or Pi coordinator performs local-context reconciliation and actual implementation tests.
+Keep both existing skill identifiers. Use actual participants, immutable turn records, append-only dialogue and same-digest approvals in `Dashboard`. Keep the same Pro chat throughout the case. Freeze Claude identity per review epoch; changing it invalidates approvals and requires a fresh challenge/response, while preserving old objections. The original Codex or Pi coordinator performs local-context reconciliation and actual implementation tests.
 
 Manual Pro web handoff remains the qualified starting transport. Read `docs/COMPUTER-USE-GATE.md`; do not bypass platform restrictions with another automation layer. The kit's revision is not itself a completed independent Pro/Claude review or installation.
 

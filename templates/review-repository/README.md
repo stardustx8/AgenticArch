@@ -1,4 +1,4 @@
-# GPT-Pro-Escalation
+# Dashboard
 
 A dedicated workspace for versioned GPT-6 Pro/Claude review cases. Keep real cases private and subject to the approved external-data policy. This repository is separate from AgenticArch and from the software being implemented.
 

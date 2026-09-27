@@ -30,7 +30,7 @@ Owner task -> deterministic policy and subscription eligibility
            -> selected Codex or Pi profile -> actual worker
            -> generation-boundary effort lease + effective-setting readback
            -> actual tools/tests and evidence
-           -> deep work: same Pro chat <-> selected Claude in GPT-Pro-Escalation
+           -> deep work: same Pro chat <-> selected Claude in Dashboard
            -> exact-version agreement -> original coordinator implements locally
 ```
 
@@ -59,4 +59,4 @@ Standard Computer Use currently excludes automating ChatGPT itself. Manual Pro Z
 
 [Architecture](docs/ARCHITECTURE.md) · [CLM adapter](docs/CLM-ADAPTER.md) · [Dynamic effort](docs/DYNAMIC-REASONING.md) · [Model evidence](docs/MODEL-EVIDENCE.md) · [Quota evaluation](docs/SUBSCRIPTION-EVALUATION.md) · [Implementation plan](docs/IMPLEMENTATION-PLAN.md) · [Review protocol](docs/ESCALATION-PROTOCOL.md) · [Security](docs/SECURITY-AND-OPERATIONS.md)
 
-Publish reusable source and sanitized development context only. Credentials, private chat bindings, customer material, local capability inventories and live cases do not belong in this public repository. `GPT-Pro-Escalation` is the separate review workspace, not provisioned by this kit.
+Publish reusable source and sanitized development context only. Credentials, private chat bindings, customer material, local capability inventories and live cases do not belong in this public repository. `Dashboard` is the separate review workspace, not provisioned by this kit.

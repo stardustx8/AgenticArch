@@ -1,6 +1,6 @@
 ---
 name: fable-adversarial-review
-description: "Coordinate real GPT-6 Pro web and a selected Claude Fable 5.1 or Opus 5.5 adversarial review in GPT-Pro-Escalation, preserve the same Pro chat, then return to the original Codex or Pi coordinator."
+description: "Coordinate real GPT-6 Pro web and a selected Claude Fable 5.1 or Opus 5.5 adversarial review in Dashboard, preserve the same Pro chat, then return to the original Codex or Pi coordinator."
 ---
 
 # Pro and selected-Claude adversarial co-production

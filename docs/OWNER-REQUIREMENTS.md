@@ -15,7 +15,7 @@ Deliver a self-contained public architecture and implementation kit in `stardust
 | R05 | Medium-tough work admits Astra high and Opus 5.5 as equal peers. | model-routing; routing tests |
 | R06 | Tough work, architecture/research and consequential design use GPT-6 Pro web with adversarial Claude review. | hard floor and case tests |
 | R07 | Retain prepare-sol-pro-architecture-review as the exact handoff skill identifier. | skills tree |
-| R08 | Prepare scoped evidence ZIP, exact manifest and prompt targeting GPT-Pro-Escalation. | case templates; skill |
+| R08 | Prepare scoped evidence ZIP, exact manifest and prompt targeting Dashboard. | case templates; skill |
 | R09 | Desired automatic Pro upload/continuation requires a permitted, supported Computer Use path; manual recovery remains available. | COMPUTER-USE-GATE |
 | R10 | Start fable-adversarial-review after Pro's verified complete initial contribution. | protocol and receipts |
 | R11 | Pro and a selected Fable 5.1 or Opus 5.5 participant challenge and improve the solution through Git. | explicit model binding |

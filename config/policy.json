@@ -45,7 +45,7 @@
   "max_coding_passes": 6,
   "max_no_progress_passes": 2,
   "debate": {
-    "review_repository_name": "GPT-Pro-Escalation",
+    "review_repository_name": "Dashboard",
     "required_roles": [
       "pro",
       "claude"

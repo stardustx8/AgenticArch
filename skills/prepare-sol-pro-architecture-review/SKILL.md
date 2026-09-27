@@ -13,7 +13,7 @@ Read [protocol](references/protocol.md), [handoff template](references/handoff-t
 
 Recover the task/session, case branch/path, current input commit, requirement/evidence digests, Pro chat binding, permission scope and selected Claude peer. Reuse an existing case and its exact Pro conversation. Select Fable 5.1 high or Opus 5.5 high through the qualified subscription worker catalog. Freeze the model in the review epoch. Fable 5.5 is not an available choice until explicitly released, qualified and activated.
 
-Use the authorized GPT-Pro-Escalation workspace. Creating it, changing visibility, pushing or exporting real context needs applicable existing authorization. Do not infer write access from a repository name. Preserve owner edits and concurrent work.
+Use the authorized Dashboard workspace. Creating it, changing visibility, pushing or exporting real context needs applicable existing authorization. Do not infer write access from a repository name. Preserve owner edits and concurrent work.
 
 ## Build the package
 

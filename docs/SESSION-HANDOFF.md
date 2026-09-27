@@ -24,7 +24,7 @@ The subsequent concurrent commit 10592526 added six research/profile documents, 
 
 ## Open gates
 
-Automatic Pro web submission remains unqualified under current official Computer Use guidance; keep manual same-chat transfers. The separate GPT-Pro-Escalation runtime repo has not been provisioned by this revision. Actual local paths/helpers, supported subscription model access, provider observers, cache/compaction and cancellation must be discovered and tested privately. No license decision or new paid service is introduced.
+Automatic Pro web submission remains unqualified under current official Computer Use guidance; keep manual same-chat transfers. The separate Dashboard runtime repo has not been provisioned by this revision. Actual local paths/helpers, supported subscription model access, provider observers, cache/compaction and cancellation must be discovered and tested privately. No license decision or new paid service is introduced.
 
 ## Next concrete session
 

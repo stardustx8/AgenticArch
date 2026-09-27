@@ -10,6 +10,6 @@ Use CLM's typed choice API with compact prose and distinct permitted action desc
 
 Adapt fixed-model effort only at an actual pre-generation boundary. Bound leases, honor manual overrides, invalidate stale state and require effective-setting acknowledgment. A host setter or mocked test does not prove caching or cancellation. Keep fixed effort where the host lacks a qualified dynamic surface.
 
-Deep cases use GPT-Pro-Escalation, the same Pro chat, immutable dialogue/turns and participant-bound approvals. Original local coordinator implements the agreed revision with a LOCAL-DELTA record. Preserve the manual Pro handoff while automatic operation remains unqualified; no alternate automation bypass.
+Deep cases use Dashboard, the same Pro chat, immutable dialogue/turns and participant-bound approvals. Original local coordinator implements the agreed revision with a LOCAL-DELTA record. Preserve the manual Pro handoff while automatic operation remains unqualified; no alternate automation bypass.
 
 Run the offline suite, kit checks, demo and profile-specific checks. Add actual integration tests incrementally. Preserve owner edits and concurrent sessions. At closeout update status/handoff/decisions with exact verification and remaining gates, then perform already-authorized publication with remote readback. Never claim live model execution, quota savings or installation based only on synthetic evidence.
