@@ -42,6 +42,15 @@ LANES: dict[str, Lane] = {l.name: l for l in (
 )}
 LOCAL_CODEX = {'gemma_codex'}      # Codex lanes that talk to the loopback model, never to OpenAI
 
+
+def loopback_url(url: str) -> str:
+    """The local worker's endpoint must stay on this machine (it gets no subscription check)."""
+    from urllib.parse import urlparse
+    u = urlparse(str(url))
+    if u.scheme not in ('http', 'https') or u.hostname not in ('127.0.0.1', 'localhost', '::1'):
+        raise ValueError(f'local_worker.base_url must be a loopback http(s) URL, got {url!r}')
+    return str(url)
+
 # Removed from every child process: any of these could switch a CLI to API billing
 # or to another provider/endpoint.
 SCRUB = ('OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY',
@@ -163,9 +172,11 @@ class Workers:
             cmd += ['--output-schema', str(schema_file)]
         if lane.name in LOCAL_CODEX:
             lw = self.local_worker
+            url = loopback_url(lw.get('base_url', 'http://127.0.0.1:8100/v1'))
+            # json.dumps quotes the value (no TOML injection); the provider never gets the ChatGPT login.
             cmd += ['-c', 'model_provider="aa_local"',
-                    '-c', f'model_providers.aa_local={{name="aa-local", base_url="{lw.get("base_url", "http://127.0.0.1:8100/v1")}", '
-                          'wire_api="responses"}',
+                    '-c', f'model_providers.aa_local={{name="aa-local", base_url={json.dumps(url)}, '
+                          'wire_api="responses", requires_openai_auth=false}',
                     '-c', f'model_context_window={int(lw.get("context_window", 131072))}',
                     '-c', 'apply_patch_tool_type="function"']
         if self.codex_no_memories:

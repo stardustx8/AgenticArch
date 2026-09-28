@@ -18,7 +18,7 @@ from .db import DB
 from .notify import Notifier
 from .decisions import PEER_LANES, peer_question, tier_question
 from .quality import QualityMixin, cleanup_quality_worktrees
-from .workers import LANES, BillingError, Workers
+from .workers import LOCAL_CODEX, LANES, BillingError, Workers
 
 PROMPTS = Path(__file__).parent / 'prompts'
 
@@ -228,7 +228,10 @@ class TaskFlow(QualityMixin):
             return
         lane = TIER_LANE.get(t['tier']) or self._choose_peer(t, exclude=())
         lf = self.cfg['local_first']
-        if lf.get('enabled') and t['tier'] in lf.get('tiers', []):
+        race = self.cfg['best_of_2'].get('enabled', True) and t['tier'] in self.cfg['best_of_2'].get('tiers', [])
+        if lf.get('enabled') and t['tier'] in lf.get('tiers', []) and not race:
+            if lf['lane'] not in LOCAL_CODEX:
+                raise ValueError(f'local_first.lane must be a loopback Codex lane, got {lf["lane"]!r}')
             t['data']['local_first'] = {'then': lane}      # the paid lane if the local attempt is not accepted
             self.db.event('local_first', t['id'], lane=lf['lane'], then=lane)
             lane = lf['lane']
@@ -341,7 +344,10 @@ class TaskFlow(QualityMixin):
             self.n.send(f'Blocked {t["id"]}', f'Subscription check failed: {exc}', tags='warning')
             return
         report = worker_report(res)
-        if self._is_local(t) and res.ok and not git.git(wt, 'status', '--porcelain', check=False).strip() \
+        # A plain-text turn fails the output schema (res.ok False), so do not require res.ok here; timeouts and
+        # a question to the owner are handled by the normal paths.
+        if self._is_local(t) and res.error != 'timeout' and report['status'] != 'blocked' \
+                and not git.git(wt, 'status', '--porcelain', check=False).strip() \
                 and not t['data'].get('empty_nudged'):
             # Local models sometimes announce a step and end the turn without any tool call (local-a-r1:
             # 4 of 24). One free nudge; a second empty turn counts as a normal failed pass.
@@ -558,7 +564,8 @@ class TaskFlow(QualityMixin):
         elif t['lane'] == 'luna_high':
             nxt = self._choose_peer(t, exclude=tried)
         elif self._is_local(t):
-            nxt = self._after_local(t)
+            self._escalate_from_local(t, 'checks')
+            return
         else:
             # Try the other medium-tough model before giving up on local implementation.
             nxt = next((p for p in MEDIUM_PEERS if p not in tried), None)
@@ -577,9 +584,11 @@ class TaskFlow(QualityMixin):
     def _escalate_from_local(self, t: dict, reason: str) -> None:
         nxt = self._after_local(t)
         t['data']['local_first']['escalated'] = reason
+        # Local attempts have their own budget (max_passes_per_lane): the paid lanes keep the full budget.
+        t['data']['local_first']['passes'] = t['passes']
         self.db.event('escalate', t['id'], frm=t['lane'], to=nxt, reason=reason)
-        self.db.update_task(t['id'], data=t['data'])
-        self._start_lane(t, nxt)
+        self.db.update_task(t['id'], passes=0, data=t['data'])
+        self._start_lane(self.db.task(t['id']), nxt)
 
     # ------------------------------------------------------------ spec check
     def _spec_check(self, t: dict) -> None:
@@ -615,7 +624,7 @@ class TaskFlow(QualityMixin):
         unmet = [c for c in verdict['criteria'] if not c['met']]
         loops = t['data'].get('spec_loops', 0)
         t['data'].setdefault('spec_reviews', []).append(
-            {'loop': loops, 'unmet': unmet, 'tampering': verdict['tampering'],
+            {'loop': loops, 'lane': t['lane'], 'judge': judge, 'unmet': unmet, 'tampering': verdict['tampering'],
              'tampering_reason': verdict['tampering_reason'], 'seconds': round(res.seconds)})
         t['data'].pop('rebuttals', None)
         if not unmet and not verdict['tampering']:
@@ -682,13 +691,17 @@ class TaskFlow(QualityMixin):
         wt = Path(t['worktree'])
         title = t['prompt'].strip().splitlines()[0][:72]
         git.git(wt, 'reset', '-q', '--soft', t['base_ref'])     # squash the wip snapshots
-        spec = t['data'].get('spec_reviews') or []
+        # Only reviews of the delivered lane's work count (a rejected local attempt is noted separately).
+        spec = [r for r in t['data'].get('spec_reviews') or [] if r.get('lane', t['lane']) == t['lane']]
+        rejected_local = (t['data'].get('local_first') or {}).get('escalated')
         triage_notes = t['data'].get('triage_notes') or {}
         spec_note = ((''.join(f'Note: check {k} {"was flaky (passed on rerun)" if v == "FLAKY" else "already failed on the base commit"}.\n'
                               for k, v in triage_notes.items())) +
                      f'Spec review: {len(spec)} round(s)' +
                      (', accepted by owner' if t['data'].get('spec_accepted_by_owner') else ', all criteria met')
-                     if spec else 'Spec review: skipped')
+                     if spec else 'Spec review: skipped') + (
+                         f'\nLocal first attempt not accepted ({rejected_local}); the delivered work is by {t["lane"]}.'
+                         if rejected_local else '')
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
                                  f'Checks:\n{t["data"].get("checks_result", "")}\n{spec_note}')
         stat = git.diffstat(wt, t['base_ref'])
