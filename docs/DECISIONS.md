@@ -195,4 +195,8 @@ Review findings or exhausted local passes escalate to the lane the tier would ha
 the same worktree with the findings. No review loops with the local model.
 The owner rejected "escalate only on failed checks": the visible tests miss new requirements (Luna rounds),
 so quality must not depend on someone adding tests.
+Correction after round-b-r1 (stopped after 4 trials): with `--output-schema`, vLLM enforced the JSON format on
+every turn, so the local model could not call tools and answered at once ("partial", or invented results). The
+local lane now gets the schema in the prompt and aa parses the last JSON object of the final message; the
+`routine` tier is included in `local_first.tiers` (the easiest work is the best fit for the local model).
 

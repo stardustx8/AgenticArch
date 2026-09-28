@@ -1963,6 +1963,20 @@ class LocalFirstTests(unittest.TestCase):
         self.assertNotIn('local_first', t['data'])
         self.assertNotIn('gemma_codex', t['data'].get('lanes_tried', []))
 
+    def test_local_lane_gets_the_schema_in_the_prompt_not_as_a_forced_format(self):
+        final = 'Done. Example: {"a": 1}\n{"status": "done", "summary": "ok", "open_items": []}'
+        def run(cmd, input, **kw):
+            out = Path(cmd[cmd.index('-o') + 1]); out.write_text(final)
+            run.cmd, run.input = cmd, input
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp}}), runner=run)
+            res = w.execute(LANES['gemma_codex'], 'task', Path(tmp), schema={'type': 'object'})
+        self.assertNotIn('--output-schema', run.cmd)        # vLLM would force JSON on every turn: no tool calls
+        self.assertIn('end your final message with one JSON object', run.input)
+        self.assertTrue(res.ok)
+        self.assertEqual(res.structured, {'status': 'done', 'summary': 'ok', 'open_items': []})
+
     def test_local_worker_url_must_be_loopback(self):
         from aa.workers import loopback_url
         self.assertEqual(loopback_url('http://127.0.0.1:8100/v1'), 'http://127.0.0.1:8100/v1')

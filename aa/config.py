@@ -136,7 +136,7 @@ DEFAULTS: dict[str, Any] = {
         # (the same spec judge); if it is not satisfied, or the checks keep failing, the task escalates to the
         # lane the tier would have used. Local-a-r1: 13/24 alone, so never without the review.
         'enabled': False,
-        'tiers': ['bounded', 'medium_tough'],
+        'tiers': ['routine', 'bounded', 'medium_tough'],
         'lane': 'gemma_codex',
         'review_lane': 'luna_high',
     },
