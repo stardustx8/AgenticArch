@@ -58,6 +58,9 @@ SCRUB = ('OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_API_KEY', 'ANTHROPIC_API_KE
          'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK')
 
 
+CLAUDE_REFRESH_RACE = re.compile(r'Failed to refresh OAuth token|another Claude Code process is refreshing', re.I)
+CLAUDE_REFRESH_TRIES = 4
+
 AUTH_FAILURE = re.compile(r'401 Unauthorized|Incorrect API key|invalid[_ ]api[_ ]key|'
                           r'authentication_error|not logged in|please (?:re-?)?log ?in', re.I)
 
@@ -104,6 +107,7 @@ class Workers:
         self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
         self.codex_no_memories = bool(cfg['workers'].get('codex_no_memories', True))
+        self.refresh_wait_s = float(cfg['workers'].get('claude_refresh_wait_s', 20))
         self.local_worker = cfg.data.get('local_worker') or {}
         self.logs = cfg.logs
         self.run = runner
@@ -276,11 +280,18 @@ class Workers:
             cmd += ['--add-dir', str(d)]
         if schema is not None:
             cmd += ['--json-schema', json.dumps(schema)]
-        try:
-            p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),
-                         timeout=self.timeout, cwd=str(cwd))
-        except subprocess.TimeoutExpired:
-            return Result(False, '', error='timeout')
+        for attempt in range(1, CLAUDE_REFRESH_TRIES + 1):
+            try:
+                p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),
+                             timeout=self.timeout, cwd=str(cwd))
+            except subprocess.TimeoutExpired:
+                return Result(False, '', error='timeout')
+            # Parallel Claude Code processes share one login; when the access token expires they race to
+            # refresh it and the losers fail at once (round-c-r1). That is transient: wait and rerun.
+            if attempt < CLAUDE_REFRESH_TRIES and CLAUDE_REFRESH_RACE.search(p.stdout[-5000:] + p.stderr[-5000:]):
+                time.sleep(self.refresh_wait_s * attempt)
+                continue
+            break
         log.write_text(f'$ {" ".join(cmd)}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}')
         data = _json_or_none(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else '')
         if not data:

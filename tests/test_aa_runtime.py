@@ -2045,3 +2045,32 @@ class TierLaneTests(unittest.TestCase):
         flow.cfg = config.load(Path('/nonexistent'), {'tier_lanes': {'bounded': 'gpt_whatever'}})
         with self.assertRaises(ValueError):
             flow._tier_lane('bounded')
+
+
+class ClaudeRefreshRaceTests(unittest.TestCase):
+    """round-c-r1: parallel Claude Code processes raced to refresh the shared login; the losers failed."""
+
+    def test_refresh_race_is_retried_not_counted_as_a_failed_pass(self):
+        race = json.dumps({'is_error': True, 'result': 'Failed to refresh OAuth token: another Claude Code '
+                           'process is refreshing it or exited mid-refresh.'})
+        ok = json.dumps({'is_error': False, 'result': 'done', 'modelUsage': {'claude-opus-5-5': {}}})
+        outs = [race, race, ok]
+        runner = mock.Mock(side_effect=lambda *a, **k: subprocess.CompletedProcess([], 0, outs.pop(0), ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
+                                                           'workers': {'claude_refresh_wait_s': 0}}), runner=runner)
+            w.verify_billing = lambda cli: None
+            res = w.execute(LANES['opus_medium'], 'p', Path(tmp))
+        self.assertTrue(res.ok)
+        self.assertEqual(runner.call_count, 3)
+
+    def test_persistent_refresh_failure_still_fails_after_the_retries(self):
+        race = json.dumps({'is_error': True, 'result': 'Failed to refresh OAuth token: another Claude Code process'})
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, race, ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
+                                                           'workers': {'claude_refresh_wait_s': 0}}), runner=runner)
+            w.verify_billing = lambda cli: None
+            res = w.execute(LANES['opus_medium'], 'p', Path(tmp))
+        self.assertFalse(res.ok)
+        self.assertEqual(runner.call_count, 4)
