@@ -146,7 +146,7 @@ def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'
 
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None):
+                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None, spec=True):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -166,6 +166,7 @@ class Env:
             'delivery': {'push_branch': True},
             'triage': {'policy': policy},
             'failure_triage': {'enabled': triage},
+            'spec_check': {'enabled': spec},     # most flow tests exercise the judge (off by default, D024)
             'oracle_tests': {'enabled': oracle},
             'best_of_2': {'enabled': best_of_2},
             'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
@@ -1092,6 +1093,16 @@ class WorkerTests(unittest.TestCase):
         self.assertIn('gpt-6-luna', cmd)
         self.assertIn('model_reasoning_effort="low"', cmd)
         self.assertIn('read-only', cmd)
+        self.assertIn('memories.use_memories=false', cmd)   # D024: personal memories stay out
+
+    def test_codex_memories_flags_can_be_turned_off(self):
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp); cfg.data['workers']['codex_no_memories'] = False
+            w = Workers(cfg, runner=runner)
+            w.verify_billing = lambda cli: None
+            w.execute(LANES['luna_low'], 'p', Path(tmp), write=False)
+        self.assertNotIn('features.memories=false', runner.call_args[0][0])
 
 
 if __name__ == '__main__':
@@ -1809,3 +1820,32 @@ class RequestAuthoritativeTests(unittest.TestCase):
         self.assertEqual(t['data']['contract_edits'], [])
         self.assertNotIn('ORIGINAL text', self.spec_prompts[0])
         self.assertNotIn('changed specification docs', t['result'])
+
+
+class SimpleDefaultTests(unittest.TestCase):
+    """D024 (2026-09-28): the simple pipeline is the default; the full pipeline's stages are opt-in."""
+
+    def test_defaults_are_the_measured_simple_pipeline(self):
+        cfg = config.load(Path('/nonexistent'))
+        for section in ('oracle_tests', 'best_of_2', 'spec_check', 'failure_triage'):
+            self.assertFalse(cfg[section]['enabled'], section)
+        self.assertTrue(cfg['workers']['codex_no_memories'])
+
+    def test_simple_flow_delivers_without_judge_oracle_or_race(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = []
+            def work(lane, cwd, prompt, extra):
+                calls.append(lane.name); return write_done(lane, cwd, prompt, extra)
+            def forbidden(lane, cwd, prompt, extra):
+                raise AssertionError('full-pipeline stage called')
+            env = Env(Path(tmp), {'triage': triage('bounded', testable=True), 'work': work, 'spec': forbidden,
+                                  'oracle': forbidden, 'pick': forbidden}, FakeCLM('bounded'),
+                      triage=False, spec=False)
+            try:
+                tid = env.app.tasks.create(env.target, 'feature')
+                env.run()
+                t = env.db.task(tid)
+                self.assertEqual(t['status'], 'DONE')
+                self.assertEqual(calls, ['luna_high'])
+            finally:
+                env.close()
