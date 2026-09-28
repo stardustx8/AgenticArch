@@ -264,6 +264,7 @@ class LocalFlowTests(unittest.TestCase):
     def test_routine_task_agreeing_votes_runs_luna_low_and_delivers_branch(self):
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'),
                        checks='test -f done.txt && touch artefact.cache')
+        self.env.cfg.data['tier_lanes']['routine'] = 'luna_low'      # the low lane still exists when configured (D027)
         tid = self.env.app.tasks.create(self.env.target, 'rename a thing')
         self.env.run()
         t = self.env.db.task(tid)
@@ -342,6 +343,7 @@ class LocalFlowTests(unittest.TestCase):
             return Result(True, 'tried', None, [lane.model])
 
         self.env = Env(self.tmp, {'triage': triage('routine'), 'work': flaky}, FakeCLM('routine'), triage=False)
+        self.env.cfg.data['tier_lanes']['routine'] = 'luna_low'      # exercises luna_low -> luna_high (D027)
         tid = self.env.app.tasks.create(self.env.target, 'x')
         self.env.run()
         self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
@@ -2030,7 +2032,7 @@ class TierLaneTests(unittest.TestCase):
         return self.env.db.task(tid)
 
     def test_defaults_stay_luna(self):
-        self.assertEqual(config.load(Path('/nonexistent'))['tier_lanes'], {'routine': 'luna_low', 'bounded': 'luna_high'})
+        self.assertEqual(config.load(Path('/nonexistent'))['tier_lanes'], {'routine': 'luna_high', 'bounded': 'luna_high'})
         self.assertEqual(self.run_tier('bounded')['status'], 'DONE')
         self.assertEqual(self.lanes, ['luna_high'])
 

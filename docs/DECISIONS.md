@@ -208,3 +208,11 @@ Luna's roles; round B (private results/round-b-r2) showed that on small tasks th
 (triage, review) decides the quota, so the reviewer and small-task worker are the levers. An unknown lane
 name is an error. Failed passes escalate as before (to the medium-tough peers, then a deep case).
 
+## D027: GPT-6 Luna always at high effort, added 2026-09-28
+
+Owner decision after the published effort curves (DeepSWE by cost per task; Artificial Analysis index for GPT-5.6
+Luna): Luna at low effort is far weaker for a few cents less per task. `tier_lanes.routine` is now `luna_high`
+(bounded already was). Opus as a builder always runs at high (`opus_high`, as for hard tasks); the Opus reviewer
+stays at medium, where medium and high both scored 40/40 on the review probe (D017). Lab rounds before
+2026-09-28 23:00 used Luna low for routine tasks; comparisons within a round are unaffected.
+
