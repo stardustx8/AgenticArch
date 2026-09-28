@@ -29,6 +29,7 @@ class Notifier:
         self.enabled = bool(n.get('enabled', True))
         self.url, self.public = n['url'].rstrip('/'), n['public_url'].rstrip('/')
         self.topic, self.reply_topic = n['topic'], n['reply_topic']
+        self.retry_delay_s = 2.0
         self.token = _read_token(n.get('token_file'))
         self.reply_token = _read_token(n.get('reply_token_file'))
 
@@ -55,10 +56,17 @@ class Notifier:
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(),
                                      headers={'Content-Type': 'application/json', **self._auth(self.token)},
                                      method='POST')
-        try:
-            urllib.request.urlopen(req, timeout=10).read()
-        except OSError as exc:  # Never let a notification failure stop the state machine.
-            self.db.event('notify_failed', error=str(exc))
+        for attempt in (1, 2):   # one retry: rate limits (HTTP 429) and restarts are transient
+            try:
+                urllib.request.urlopen(req, timeout=10).read()
+                return
+            except OSError as exc:  # Never let a notification failure stop the state machine.
+                if attempt == 2 or not _transient(exc):
+                    # Visible in the journal and in `aa doctor`, not only in the events table.
+                    print(f'[notify] FAILED {title!r}: {exc}', file=sys.stderr)
+                    self.db.event('notify_failed', title=title[:120], error=str(exc)[:300])
+                    return
+                time.sleep(self.retry_delay_s)
 
     def poll_replies(self) -> list[str]:
         """Return new reply lines from the ntfy reply topic (and remember the cursor)."""
@@ -72,8 +80,16 @@ class Notifier:
         try:
             req = urllib.request.Request(url, headers=self._auth(self.token))
             raw = urllib.request.urlopen(req, timeout=10).read().decode()
-        except OSError:
+        except OSError as exc:
+            # Replies silently missing would strand owner answers: log once per outage.
+            if self.db.kv_get('ntfy_poll_failing') != '1':
+                self.db.kv_set('ntfy_poll_failing', '1')
+                print(f'[notify] reply polling failing: {exc}', file=sys.stderr)
+                self.db.event('notify_poll_failed', error=str(exc)[:300])
             return []
+        if self.db.kv_get('ntfy_poll_failing') == '1':
+            self.db.kv_set('ntfy_poll_failing', '0')
+            self.db.event('notify_poll_recovered')
         out = []
         for line in raw.splitlines():
             try:
@@ -86,6 +102,13 @@ class Notifier:
             if msg.get('message'):
                 out.append(msg['message'].strip())
         return out
+
+
+def _transient(exc: OSError) -> bool:
+    # No HTTP code = connection error or timeout. A timed-out POST may already have been accepted,
+    # so a retry can duplicate a push; a duplicate is preferred over a lost question.
+    code = getattr(exc, 'code', None)
+    return code is None or code == 429 or code >= 500
 
 
 def _read_token(path: str | None) -> str:
