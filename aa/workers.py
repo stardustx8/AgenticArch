@@ -166,7 +166,13 @@ class Workers:
         for d in extra_dirs:
             cmd += ['--add-dir', str(d)]
         schema_file = None
-        if schema is not None:
+        local = lane.name in LOCAL_CODEX
+        if schema is not None and local:
+            # vLLM enforces an output schema on every turn, which rules out tool calls: the model answers at
+            # once without working (round-b-r1). Ask for the JSON in the prompt and parse the last object.
+            prompt += ('\n\nWhen you have finished the work, end your final message with one JSON object that '
+                       f'matches this JSON schema (no text after it):\n{json.dumps(schema)}\n')
+        elif schema is not None:
             schema_file = log.with_suffix('.schema.json')
             schema_file.write_text(json.dumps(schema))
             cmd += ['--output-schema', str(schema_file)]
@@ -205,7 +211,7 @@ class Workers:
             self._auth_ok.pop('codex', None)
             raise BillingError('Codex login rejected by the server (401). Re-login with `codex login` '
                                '(ChatGPT account), then `aa answer "retry <task>"`.')
-        structured = _json_or_none(text) if schema is not None else None
+        structured = (_last_json_object(text) if local else _json_or_none(text)) if schema is not None else None
         ok = p.returncode == 0 and bool(text.strip()) and (schema is None or structured is not None)
         return Result(ok, text, structured, [lane.model] if ok else [], usage,
                       error='' if ok else (p.stderr[-2000:] or f'exit {p.returncode}'))
@@ -318,6 +324,22 @@ def sandbox_settings(cwd: Path, extra_dirs: tuple[Path, ...] = ()) -> dict:
                        'denyRead': ['~/.ssh', '~/.codex/auth.json', '~/.claude/.credentials.json',
                                     '~/.config/agenticarch', '~/.local/share/agenticarch/aa.sqlite']},
     }}
+
+
+def _last_json_object(text: str) -> dict | None:
+    """The last JSON object in free text (a local model's final message may start with prose or code)."""
+    dec = json.JSONDecoder()
+    text = text or ''
+    pos = text.rfind('{')
+    while pos >= 0:
+        try:
+            v, _ = dec.raw_decode(text, pos)
+            if isinstance(v, dict) and 'status' in v:
+                return v
+        except ValueError:
+            pass
+        pos = text.rfind('{', 0, pos)
+    return _json_or_none(text)
 
 
 def _json_or_none(text: str) -> dict | None:
