@@ -64,6 +64,33 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   (custom provider on 127.0.0.1:8100, Responses API). Results in the private repo `results/local-a-r1`.
   Pro turn 04 (`turns/PRO-TURN-04.md`) is with the owner.
 
+## 2026-09-28 afternoon and evening
+
+- Merged into `m1-working-runtime` (owner-delegated review and merge):
+  - PR #7/#8: local-first lane, off by default (D025);
+  - PR #9: configurable tier lanes (D026);
+  - PR #10: retry of the Claude login-refresh race;
+  - PR #11: GPT-6 Luna always at high effort (D027).
+- Rounds, all in the private repo `results/`:
+  - round-b-r2: free local model first with a Luna review. 21/24 vs lean 20/24, no quota saving, 7x slower.
+  - round-c-r2: Claude Opus 5.5 as the cheap worker. 23/24 vs Luna 21/24, equally fast; shifts Codex use to Claude.
+  - round-d-r2: Jev pre-screen before the Opus review. Running at handoff.
+- Decision models (Jev by TypeSafe, a paid API):
+  - Jev is allowed for offline tests and lab rounds only, not the runtime.
+  - The key is in `~/.config/typesafe/key`; a reseller key from jevtypesafeai.com was rejected.
+  - Results:
+    - jev-probe-r1 / jev-revisit-r1: Jev far better calibrated than SemIf.
+    - jev-calib-r1: on real diffs, 0.9 skips only 12% of reviews.
+- Owner tools:
+  - The shared ntfy channel for all projects (topics `agents` / `agents-replies`).
+  - `agent-notify`, `agent-replies` and `agent-channel`, with per-chat channel numbers: this lab chat is channel 1, the Mac Codex chat is channel 2.
+  - The notify-owner skill for Claude Code and Codex; source in the private repo under `tools/agent-notify`.
+- Test ledger page for others: https://claude.ai/artifact/J4cnLpvFFDL77HMQdAF4BK (generator in the private repo `research/harness-opt-01/effort/`).
+- Round E is prepared, not started:
+  - Mealie (FastAPI + Nuxt) is cloned in `~/lab-e/mealie`.
+  - Backend and frontend tests run; python-ldap needs `sudo apt install libldap2-dev libsasl2-dev`, a lab stub is in place until then.
+  - Arms: planner split plus Jev routing, vs planner routing. Specs and hidden exams still to write.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).
