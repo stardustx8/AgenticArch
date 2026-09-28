@@ -1,6 +1,6 @@
 # Session handoff
 
-Updated 2026-09-28 early (Claude Code session on the workstation, branch `m1-working-runtime`).
+Updated 2026-09-28 morning (Claude Code session on the workstation, branch `m1-working-runtime`).
 
 ## State
 
@@ -54,9 +54,15 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
 - Lab tooling: `~/ho04-private` (round scripts, notify.py with delivery check, monitors). ntfy: phone
   user `phone` (read agenticarch, write agenticarch-replies); the lab listens on the reply topic for
   messages starting `lab:`. ntfy rate-limit exemption for 127.0.0.1 and the Docker gateway 172.17.0.1.
-- Recommendation pending the owner: merge PR #4 then #5 (they conflict only where both append a test
-  class; merge the base into #5 afterwards); simple pipeline as default, full pipeline opt-in; Pro turn 04
-  in a new chat (`turns/PRO-TURN-04.md`); local-model round A with the owner at home.
+- 2026-09-28 morning, owner decisions: I reviewed (independent subagent), fixed and merged PR #4 (D023),
+  PR #5 (ntfy) and PR #6 (D024: simple pipeline by default, full-pipeline stages opt-in, Codex memories
+  off for workers) into `m1-working-runtime`; aa-daemon restarted on it. The owner delegated PR review
+  and merges into this branch; `main` stays the owner's.
+- Round A (local model as worker): aa-gemma runs with a reversible systemd drop-in
+  (`~/.config/systemd/user/aa-gemma.service.d/round-a.conf`: tool calling, gemma4 reasoning parser, 128k
+  context, 2 sequences, 62% GPU); Codex uses it per call via `~/ho04-private/local-a/codex-local.sh`
+  (custom provider on 127.0.0.1:8100, Responses API). Results in the private repo `results/local-a-r1`.
+  Pro turn 04 (`turns/PRO-TURN-04.md`) is with the owner.
 
 ## Next steps
 
