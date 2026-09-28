@@ -19,24 +19,25 @@ Workers are the owner's subscription CLIs: `~/.local/bin/codex` (ChatGPT login) 
 ## Task flow
 
 ```text
+Default since D024: the simple pipeline. Stages marked [opt-in] are off unless enabled in aa.toml.
 aa task "..."  (or the agenticarch skill in Codex desktop)
   -> triage: Codex gpt-6-luna high (read-only, JSON) + SemIf tier vote
        agree / one abstains -> tier;  disagree -> ntfy asks owner (buttons)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
   -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
-  -> oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
+  -> [opt-in] oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
      (+ an extra set by local Gemma; in races Gemma is the neutral main author),
      validated (syntax, must fail on base; one repair round), read-only for workers;
      a worker that disputes a named test file while everything else passes (checked with the
      oracle files hidden) gets that author's test set dropped - no owner ping, no escalation
-  -> medium_tough (or a Luna task out of retries): Astra and Opus race in parallel worktrees;
+  -> [opt-in] medium_tough (or a Luna task out of retries): Astra and Opus race in parallel worktrees;
      checks decide, two-vendor judge panel when both pass (split -> Gemma in both orders,
      inconsistent -> smaller diff)
   -> worker in git worktree aa/<task> -> snapshot -> coordinator runs checks
      (worker prompt: the owner's request is authoritative, repo docs/contracts define done,
       no triage criteria - D023; edits to existing spec/contract docs are flagged)
-     fail -> failure triage per failed check:
+     fail -> [opt-in] failure triage per failed check (off: retry with the failure):
        passes on rerun: FLAKY (noted) | SemIf says environment: pause + ntfy Retry/Treat as code/Cancel
        same failure on the base commit: PRE_EXISTING (spec judge told) | else CODE:
        retry same lane with the failure (2x), then escalate lane, then deep case
@@ -44,8 +45,8 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
        (retry.max_owner_questions) a further block counts as a failed pass
      backstop: every model call is logged (event model_call); a task at retry.max_model_calls (40;
        normal lab tasks use <= 13) is BLOCKED + ntfy; `retry` gives it a fresh budget
-  -> pass: mutation gate (planted bugs in changed code must be caught by the oracle tests)
-  -> spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
+  -> pass: [opt-in, with oracle tests] mutation gate (planted bugs in changed code must be caught by the oracle tests)
+  -> [opt-in] spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
      against the diff, read-only in the worktree
        unmet -> back to the same worker with the reasons; worker fixes or answers REBUTTAL:
        after 3 loops -> ntfy: Accept / One more / Cancel

@@ -91,6 +91,7 @@ class Workers:
         self.claude = str(cfg.path('workers', 'claude'))
         self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
+        self.codex_no_memories = bool(cfg['workers'].get('codex_no_memories', True))
         self.logs = cfg.logs
         self.run = runner
         self._auth_ok: dict[str, float] = {}
@@ -155,6 +156,10 @@ class Workers:
             schema_file = log.with_suffix('.schema.json')
             schema_file.write_text(json.dumps(schema))
             cmd += ['--output-schema', str(schema_file)]
+        if self.codex_no_memories:
+            # Suppresses automatic memory use and generation for this call only (not filesystem reads).
+            cmd += ['-c', 'features.memories=false', '-c', 'memories.use_memories=false',
+                    '-c', 'memories.generate_memories=false']
         cmd.append('-')
         try:
             p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),

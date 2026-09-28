@@ -58,6 +58,9 @@ DEFAULTS: dict[str, Any] = {
         'max_parallel': 3,
         # auto | sandbox | acceptEdits — see Workers.__init__ (owner choice 2026-09-26: auto).
         'claude_guard': 'auto',
+        # Keep the owner's personal Codex memories out of harness workers (native per-call flags; the
+        # subscription login stays where it is). The lab measured all arms this way (D024).
+        'codex_no_memories': True,
     },
     'triage': {
         # Codex model that proposes the tier (read-only inspection of the repo).
@@ -95,7 +98,8 @@ DEFAULTS: dict[str, Any] = {
     'oracle_tests': {
         # Independent acceptance tests before implementation (other vendor than the implementer),
         # must fail on the base commit, read-only for workers; mutation gate after checks pass.
-        'enabled': True,
+        # Off by default since D024 (simple pipeline): no measured gain, twice the time.
+        'enabled': False,
         'tiers': ['bounded', 'medium_tough'],
         'author_for_race': 'gemma_local',     # neutral for both racers; falls back to luna_high
         'extra_author': 'gemma_local',        # single lane: additional independent test set
@@ -104,7 +108,8 @@ DEFAULTS: dict[str, Any] = {
     },
     'best_of_2': {
         # Astra and Opus implement in parallel; checks decide, pairwise judge when both pass.
-        'enabled': True,
+        # Off by default since D024 (simple pipeline).
+        'enabled': False,
         'tiers': ['medium_tough'],
         'on_escalation': True,          # a Luna task that exhausted its retries races both
         'judge_lanes': ['opus_medium', 'astra_high'],   # both vendors judge; split -> tie-break
@@ -121,14 +126,16 @@ DEFAULTS: dict[str, Any] = {
     'failure_triage': {
         # Failed checks: rerun once (flaky), compare with the base commit (pre-existing),
         # local decider flags environment problems (pause + ask owner) — eval/PROBES.md.
-        'enabled': True,
+        # Off by default since D024 (simple pipeline).
+        'enabled': False,
         'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
     'spec_check': {
         # After the checks pass, an independent reviewer judges every acceptance criterion
         # against the diff (owner decision 2026-09-26: Opus 5.5, max 3 loops, then the owner).
         # Opus medium = high = 40/40 on the blind spec probe (eval/PROBES.md), so medium.
-        'enabled': True,
+        # Off by default since D024: it blocked a correct delivery over an untested ambiguity.
+        'enabled': False,
         'lane': 'opus_medium',
         'max_loops': 3,
     },

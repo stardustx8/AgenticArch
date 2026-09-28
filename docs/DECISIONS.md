@@ -160,3 +160,24 @@ must restate only what the request or repository requires and never add requirem
 edits to existing specification documents (contract/spec/interface/requirement/api files, spec(s)/
 and contract(s)/ directories) are recorded, shown to the spec judge with the original text, and
 named in the delivery result.
+
+## D024: the simple pipeline is the default; the full pipeline's stages are opt-in, added 2026-09-28
+
+Owner decision after the overnight lab rounds (private research branch, results/u04-confirm-r1,
+u04-confirm-full-r1, u04-luna-r1, noharness-luna-r1). On the four ultra-hard lab projects, with D023:
+simple pipeline 8/8 in 8.9 min, equal to plain `codex exec` Astra high (8/8, 8.5 min); full pipeline
+3/4 in 19.7 min. Its spec judge found a real ambiguity the hidden tests do not check and handed back a
+delivery that passed every hidden test. Before D023 the full pipeline was 7/8 vs 6/8 at twice the time,
+and the earlier task suite (ho01-r1b) showed no gain either.
+Now off by default: oracle tests with the mutation gate, the best-of-2 race, the spec check and failure
+triage. The code and tests stay and each can be enabled in aa.toml, but none is recommended until a new
+measurement shows a gain. Findings kept for later: the spec judge is good at spotting real ambiguities,
+so a non-blocking "flag it to the owner" variant may be worth measuring. The race picked Opus only on the
+sync project. The contract-edit guard of D023 stays on (it only records and reports).
+Also on by default: Codex workers run with memory use and generation switched off per call
+(`workers.codex_no_memories`), as in every lab arm, so the owner's personal Codex memories never reach
+harness workers. The subscription login is not touched.
+Luna finding for routing: Luna high solved 2-3/8 of the ultra-hard projects with or without aa and always
+passed the visible checks, so escalation on failed checks never fired. Routing hard work to Astra has to
+rely on the triage tier (or a stronger trigger), not on check failures.
+
