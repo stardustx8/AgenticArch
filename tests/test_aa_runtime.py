@@ -94,8 +94,8 @@ def _complete_verdict(verdict: dict, prompt: str) -> dict:
     import re as _re
     n = max([int(m) for m in _re.findall(r'^(\d+)\. ', prompt.split('Acceptance criteria', 1)[-1], _re.M)] or [1])
     have = {c.get('index') for c in verdict.get('criteria', [])}
-    if not have:                 # an empty verdict stays empty: the coordinator must reject it
-        return verdict
+    if not have or verdict.get('exact'):   # empty or explicitly exact verdicts stay as they are
+        return {k: v for k, v in verdict.items() if k != 'exact'}
     extra = [{'index': i, 'criterion': 'auto', 'met': True, 'reason': 'ok'} for i in range(max(have) + 1, n + 1)]
     return dict(verdict, criteria=list(verdict.get('criteria', [])) + extra)
 
@@ -1691,6 +1691,33 @@ class RequestAuthoritativeTests(unittest.TestCase):
         self.assertIn('-Rows carry `restated: bool`.', self.spec_prompts[0])
         self.assertIn('changed specification docs (review them): docs/contracts.md', t['result'])
         self.assertIn('contract_edit', [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE task_id=?', (tid,))])
+
+    def test_verdict_without_the_task_as_written_never_passes(self):
+        only_first = lambda lane, cwd, prompt, extra: Result(True, '', dict(spec_verdict([]), exact=True), [lane.model])
+        self.env = Env(self.tmp, {'triage': self.tri(), 'work': write_done, 'spec': only_first}, FakeCLM('bounded'))
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(40)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'BLOCKED')
+        self.assertIn('judged criteria [1], expected 1..2', t['result'])
+
+    def test_contract_doc_pattern(self):
+        from aa.quality import CONTRACT_DOC
+        for path in ('docs/contracts.md', 'specs/billing/rows.md', 'docs/openapi.yaml', 'api-spec.md',
+                     'docs/API.md', 'docs/interface_v2.md', 'contracts/x.json', 'docs/requirements.md'):
+            self.assertTrue(CONTRACT_DOC.search(path), path)
+        for path in ('requirements.txt', 'dev-requirements.txt', 'notes/inspection.md', 'README.md',
+                     'docs/handoff.md', 'docs/capital.md', 'docs/rapid.md'):
+            self.assertFalse(CONTRACT_DOC.search(path), path)
+
+    def test_moved_contract_is_an_edit(self):
+        self.spec_prompts = []
+        def move(lane, cwd, prompt, extra):
+            sh(cwd, 'git', 'mv', 'docs/contracts.md', 'docs/old-notes.md')
+            return write_done(lane, cwd, prompt, extra)
+        tid = self._contract_env(move)
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['data']['contract_edits'], ['docs/contracts.md'])
 
     def test_new_docs_and_handoff_notes_are_not_contract_edits(self):
         self.spec_prompts = []

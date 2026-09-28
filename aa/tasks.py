@@ -324,7 +324,7 @@ class TaskFlow(QualityMixin):
                     f'Feedback on it (address it; keep what works):\n{prev}\n') if prev else '')
         owner_answers = self._answers_text(t)
         prompt = render('worker.md', worktree=wt, branch=t['branch'] or f'aa/{t["id"]}',
-                        prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
+                        prompt=t['prompt'],
                         paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
                         checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()],
                                       '- (none configured)'),

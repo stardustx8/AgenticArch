@@ -88,8 +88,8 @@ class QualityMixin:
     def _idea_notes(self, t: dict) -> str:
         notes = []
         if self._idea('authority_order'):
-            notes.append('Order of authority: the owner\'s task statement > the acceptance criteria > tests > '
-                         'existing code. Never bend code to satisfy a test that contradicts the task; report such '
+            notes.append('Order of authority: the owner\'s task statement > the repository\'s documented contracts > '
+                         'tests > existing code. Never bend code to satisfy a test that contradicts the task; report such '
                          'contradictions in `spec_conflicts` instead.')
         if self._idea('defect_twins'):
             notes.append('If you fix a bug, search the repository for the same defect pattern elsewhere (same '
@@ -193,12 +193,11 @@ class QualityMixin:
         tri = t['data'].get('triage') or {}
         local = LANES[author].cli == 'local'
         if local:
-            prompt = render('oracle_local.md', prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
+            prompt = render('oracle_local.md', prompt=t['prompt'],
                             context=_repo_context(wt, tri.get('relevant_paths') or []),
                             owner_answers=self._answers_text(t))
         else:
             prompt = render('oracle.md', worktree=wt, prompt=t['prompt'],
-                            acceptance=bullet(tri.get('acceptance_criteria')),
                             checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none)'),
                             owner_answers=self._answers_text(t))
         verdict, problem = None, ''
@@ -410,7 +409,6 @@ class QualityMixin:
             cands[lane] = wt
         prompt_for = lambda wt: render(
             'worker.md', worktree=wt, branch=f'aa/{t["id"]}', prompt=t['prompt'],
-            acceptance=bullet(tri.get('acceptance_criteria')),
             paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
             checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none configured)'),
             ideas=self._idea_notes(t),
@@ -752,16 +750,22 @@ def diff_audit(wt: Path, start: str, oracle_files: list[str]) -> list[str]:
     return out
 
 
-CONTRACT_DOC = re.compile(r'(^|/)(specs?|contracts?)/[^/]+\.(md|rst|txt|ya?ml|json)$|'
-                          r'(^|/)[^/]*(contract|spec|interface|requirement|api)[^/]*\.(md|rst|txt)$', re.I)
+# Specification documents: anything under specs/ or contracts/, OpenAPI/Swagger files, and docs named
+# after a spec, contract, interface, requirements or API (name parts split by - _ . or space), but not
+# dependency lists such as requirements.txt (lab u04-confirm-r1 and review of PR #4).
+CONTRACT_DOC = re.compile(
+    r'(^|/)(specs?|contracts?)/(.+/)?[^/]+\.(md|rst|txt|ya?ml|json)$|'
+    r'(^|/)(openapi|swagger)[^/]*\.(ya?ml|json)$|'
+    r'(^|/)([^/]*[-_. ])?(specs?|specification|contracts?|interfaces?|requirements?|api)([-_. ][^/]*)?\.(md|rst)$',
+    re.I)
 
 
 def contract_edits(wt: Path, base: str, exclude=()) -> list[str]:
-    """Existing specification documents the change modified or deleted (new files are not edits)."""
-    out = git.git(wt, 'diff', '--name-status', f'{base}..HEAD', check=False)
+    """Existing specification documents the change modified, deleted or moved (new files are not edits)."""
+    out = git.git(wt, 'diff', '--name-status', '--no-renames', '-z', f'{base}..HEAD', check=False)
+    fields = out.split('\0')
     edited = []
-    for line in out.splitlines():
-        parts = line.split('\t')
-        if len(parts) >= 2 and parts[0][:1] in ('M', 'D') and CONTRACT_DOC.search(parts[1]) and parts[1] not in exclude:
-            edited.append(parts[1])
+    for status, path in zip(fields[0::2], fields[1::2]):
+        if status[:1] in ('M', 'D') and CONTRACT_DOC.search(path) and path not in exclude:
+            edited.append(path)
     return edited

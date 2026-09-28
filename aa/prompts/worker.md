@@ -28,6 +28,6 @@ Your final answer is the JSON object required by the output schema:
 - question: your question for the owner (empty unless blocked).
 - rebuttals: if a reviewer finding is wrong, one entry per finding citing the file and
   lines that already satisfy it (empty otherwise).
-- spec_conflicts: contradictions you found between the request, the repository, the triage
-  notes and the tests (empty if none).
+- spec_conflicts: contradictions you found between the request, the repository's documentation
+  and the tests (empty if none).
 $owner_answers
