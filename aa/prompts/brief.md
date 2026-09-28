@@ -21,6 +21,7 @@ $prompt
 $summary
 
 Acceptance criteria (proposed):
+(triage paraphrase; the task statement is authoritative where they differ)
 $acceptance
 
 Risks noticed:

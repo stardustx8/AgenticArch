@@ -1,6 +1,6 @@
 # Session handoff
 
-Updated 2026-09-26 late (Claude Code session on the workstation, branch `m1-working-runtime`).
+Updated 2026-09-28 early (Claude Code session on the workstation, branch `m1-working-runtime`).
 
 ## State
 
@@ -34,6 +34,29 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   ceiling, and a Pro-escalation artefact (no GitHub origin in the lab). Pro turn 03 redesigns. When it ends: review the diff with a fresh subagent, run EXPERIMENTS.md rounds from
   the worktree under `systemd-run --user -p MemoryMax=48G -p OOMPolicy=continue`, push results
   to `results/<round>/`, write `turns/PRO-TURN-NN.md`, give the owner the one-line prompt.
+
+## 2026-09-27/28: no-harness baseline and the worker-prompt finding
+
+- Ultra-hard lab projects (branch `owner/ultra-projects`: revenue, pipeline, backup, sync): simple
+  pipeline 4/6 + 2/2 sync, full 5/6 + 2/2, plain `codex exec` Astra high (no harness) 8/8.
+- Diagnosis (results/diag-r1..diag4 in the private repo): the triage-paraphrased acceptance criteria in
+  the worker prompt caused the in-harness misses (and workers rewrote the contract to fit). On
+  identical code: original prompt 1/8, criteria as hints 6/8, no criteria 8/8 = raw.
+- Decided and built: D023 (PR #4, `owner/request-authoritative`): request authoritative, no triage
+  criteria in worker/oracle prompts, spec judge always judges the task as written, triage never invents
+  requirements, contract-edit guard. Separate fix PR #5 (`owner/notify-failures`): ntfy retries and
+  visible failures. Neither is merged; the owner merges.
+- Overnight results (2026-09-28, private repo results/*, brief in results/MORNING-BRIEF-20260928.md):
+  aa simple + D023 8/8 in 8.9 min (= plain Astra 8/8); aa full + D023 3/4 in 19.7 min (its spec judge
+  handed back a correct delivery over a real, untested ambiguity); Luna first (aa cascade) 3/8 and plain
+  Luna 2/8: Luna always passed the visible checks, so aa never escalated. Cheap-first needs difficulty
+  routing or a stronger trigger than failed checks.
+- Lab tooling: `~/ho04-private` (round scripts, notify.py with delivery check, monitors). ntfy: phone
+  user `phone` (read agenticarch, write agenticarch-replies); the lab listens on the reply topic for
+  messages starting `lab:`. ntfy rate-limit exemption for 127.0.0.1 and the Docker gateway 172.17.0.1.
+- Recommendation pending the owner: merge PR #4 then #5 (they conflict only where both append a test
+  class; merge the base into #5 afterwards); simple pipeline as default, full pipeline opt-in; Pro turn 04
+  in a new chat (`turns/PRO-TURN-04.md`); local-model round A with the owner at home.
 
 ## Next steps
 

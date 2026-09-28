@@ -7,17 +7,17 @@ Task:
 $prompt
 >>>
 
-Acceptance criteria:
-$acceptance
+What is required is defined by the task above together with the repository's own
+documentation, contracts and existing tests (shown below).
 
 Repository files (current state, before the task is implemented):
 $context
 
 Rules:
 - Use the repository's existing test framework and conventions (see the example test above).
-- Each test encodes an acceptance criterion as observable behaviour through public
+- Each test encodes a requirement stated in the task or the repository as observable behaviour through public
   interfaces. Tests must FAIL on the current code and PASS once the task is implemented
-  correctly. Include edge cases the criteria imply; do not invent requirements.
+  correctly. Include edge cases the task and documentation imply; do not invent requirements.
 - Only NEW test files, in the repository's test directory, with names that do not exist yet
   (use a name ending in _indep, e.g. tests/test_<feature>_indep.py). Write complete,
   syntactically valid files.

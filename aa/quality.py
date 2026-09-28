@@ -88,8 +88,8 @@ class QualityMixin:
     def _idea_notes(self, t: dict) -> str:
         notes = []
         if self._idea('authority_order'):
-            notes.append('Order of authority: the owner\'s task statement > the acceptance criteria > tests > '
-                         'existing code. Never bend code to satisfy a test that contradicts the task; report such '
+            notes.append('Order of authority: the owner\'s task statement > the repository\'s documented contracts > '
+                         'tests > existing code. Never bend code to satisfy a test that contradicts the task; report such '
                          'contradictions in `spec_conflicts` instead.')
         if self._idea('defect_twins'):
             notes.append('If you fix a bug, search the repository for the same defect pattern elsewhere (same '
@@ -193,12 +193,11 @@ class QualityMixin:
         tri = t['data'].get('triage') or {}
         local = LANES[author].cli == 'local'
         if local:
-            prompt = render('oracle_local.md', prompt=t['prompt'], acceptance=bullet(tri.get('acceptance_criteria')),
+            prompt = render('oracle_local.md', prompt=t['prompt'],
                             context=_repo_context(wt, tri.get('relevant_paths') or []),
                             owner_answers=self._answers_text(t))
         else:
             prompt = render('oracle.md', worktree=wt, prompt=t['prompt'],
-                            acceptance=bullet(tri.get('acceptance_criteria')),
                             checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none)'),
                             owner_answers=self._answers_text(t))
         verdict, problem = None, ''
@@ -351,8 +350,21 @@ class QualityMixin:
         self.db.event('mutation_gate', t['id'], score=score, killed=killed, total=len(mutants))
         self.db.update_task(t['id'], data=t['data'])
 
+    def _record_contract_edits(self, t: dict, wt: Path) -> None:
+        """A worker that rewrites the specification to fit its code must not grade itself (lab diag3)."""
+        edits = contract_edits(wt, t['base_ref'], (t['data'].get('oracle') or {}).get('files', []))
+        t['data']['contract_edits'] = edits
+        if edits:
+            t['data']['contract_diff'] = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', '--', *edits, check=False)[:8000]
+            self.db.event('contract_edit', t['id'], files=edits[:10])
+
     def _quality_note_for_judge(self, t: dict) -> str:
         notes = []
+        if t['data'].get('contract_edits'):
+            notes.append('The worker changed these specification documents: ' + ', '.join(t['data']['contract_edits']) +
+                         '. Judge the delivery against the ORIGINAL text (the "-" lines below). An edit that narrows, '
+                         'weakens or removes a documented requirement makes the related criterion unmet unless the '
+                         'task explicitly asks for that change.\n```diff\n' + t['data'].get('contract_diff', '') + '\n```')
         m = t['data'].get('mutation') or {}
         if m.get('score') is not None and m['score'] < float(self.cfg['oracle_tests'].get('min_mutation_score', 0.5)):
             notes.append(f'The independent acceptance tests may be weak: they detected only {m["killed"]} of '
@@ -397,7 +409,6 @@ class QualityMixin:
             cands[lane] = wt
         prompt_for = lambda wt: render(
             'worker.md', worktree=wt, branch=f'aa/{t["id"]}', prompt=t['prompt'],
-            acceptance=bullet(tri.get('acceptance_criteria')),
             paths=', '.join(tri.get('relevant_paths') or []) or '(explore as needed)',
             checks=bullet([f'{k}: `{v}`' for k, v in (t['data'].get('checks') or {}).items()], '- (none configured)'),
             ideas=self._idea_notes(t),
@@ -737,3 +748,24 @@ def diff_audit(wt: Path, start: str, oracle_files: list[str]) -> list[str]:
             if DEBUG_LINE.search(ln):
                 out.append(f'debug statement added in {f}: {ln[1:].strip()[:100]}')
     return out
+
+
+# Specification documents: anything under specs/ or contracts/, OpenAPI/Swagger files, and docs named
+# after a spec, contract, interface, requirements or API (name parts split by - _ . or space), but not
+# dependency lists such as requirements.txt (lab u04-confirm-r1 and review of PR #4).
+CONTRACT_DOC = re.compile(
+    r'(^|/)(specs?|contracts?)/(.+/)?[^/]+\.(md|rst|txt|ya?ml|json)$|'
+    r'(^|/)(openapi|swagger)[^/]*\.(ya?ml|json)$|'
+    r'(^|/)([^/]*[-_. ])?(specs?|specification|contracts?|interfaces?|requirements?|api)([-_. ][^/]*)?\.(md|rst)$',
+    re.I)
+
+
+def contract_edits(wt: Path, base: str, exclude=()) -> list[str]:
+    """Existing specification documents the change modified, deleted or moved (new files are not edits)."""
+    out = git.git(wt, 'diff', '--name-status', '--no-renames', '-z', f'{base}..HEAD', check=False)
+    fields = out.split('\0')
+    edited = []
+    for status, path in zip(fields[0::2], fields[1::2]):
+        if status[:1] in ('M', 'D') and CONTRACT_DOC.search(path) and path not in exclude:
+            edited.append(path)
+    return edited

@@ -7,6 +7,7 @@ $prompt
 >>>
 
 Acceptance criteria:
+(triage paraphrase; the task statement is authoritative where they differ)
 $acceptance
 
 Return the JSON object required by the output schema:
