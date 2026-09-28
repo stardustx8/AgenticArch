@@ -200,3 +200,11 @@ every turn, so the local model could not call tools and answered at once ("parti
 local lane now gets the schema in the prompt and aa parses the last JSON object of the final message; the
 `routine` tier is included in `local_first.tiers` (the easiest work is the best fit for the local model).
 
+## D026: configurable worker lanes for routine and bounded tasks, added 2026-09-28
+
+`tier_lanes.routine` / `tier_lanes.bounded` (defaults unchanged: Luna low / Luna high) select the worker
+for those tiers. Purpose: round C tests the owner's idea of Claude Opus (Claude Code subscription) in
+Luna's roles; round B (private results/round-b-r2) showed that on small tasks the per-task fixed cost
+(triage, review) decides the quota, so the reviewer and small-task worker are the levers. An unknown lane
+name is an error. Failed passes escalate as before (to the medium-tough peers, then a deep case).
+

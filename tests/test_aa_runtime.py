@@ -2004,3 +2004,44 @@ class LocalFirstTests(unittest.TestCase):
         self.assertIn('gemma-4-31b', cmd)
         self.assertIn('memories.use_memories=false', cmd)
         self.assertIn('requires_openai_auth=false', cmd)
+
+
+class TierLaneTests(unittest.TestCase):
+    """Round C (2026-09-28): routine/bounded worker lanes are configurable (Opus vs Luna)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.lanes = []
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def run_tier(self, tier, lanes=None):
+        def work(lane, cwd, prompt, extra):
+            self.lanes.append(lane.name); return write_done(lane, cwd, prompt, extra)
+        self.env = Env(self.tmp, {'triage': triage(tier), 'work': work}, FakeCLM(tier), triage=False, spec=False)
+        if lanes:
+            self.env.cfg.data['tier_lanes'].update(lanes)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        return self.env.db.task(tid)
+
+    def test_defaults_stay_luna(self):
+        self.assertEqual(config.load(Path('/nonexistent'))['tier_lanes'], {'routine': 'luna_low', 'bounded': 'luna_high'})
+        self.assertEqual(self.run_tier('bounded')['status'], 'DONE')
+        self.assertEqual(self.lanes, ['luna_high'])
+
+    def test_bounded_and_routine_can_go_to_opus(self):
+        t = self.run_tier('routine', {'routine': 'opus_medium', 'bounded': 'opus_medium'})
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(self.lanes, ['opus_medium'])
+
+    def test_unknown_lane_is_an_error(self):
+        from aa.tasks import TaskFlow
+        flow = TaskFlow.__new__(TaskFlow)
+        flow.cfg = config.load(Path('/nonexistent'), {'tier_lanes': {'bounded': 'gpt_whatever'}})
+        with self.assertRaises(ValueError):
+            flow._tier_lane('bounded')

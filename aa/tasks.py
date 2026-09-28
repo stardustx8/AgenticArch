@@ -226,7 +226,7 @@ class TaskFlow(QualityMixin):
         if t['tier'] == 'tough':
             self._to_deep(t, 'tier tough')
             return
-        lane = TIER_LANE.get(t['tier']) or self._choose_peer(t, exclude=())
+        lane = self._tier_lane(t['tier']) or self._choose_peer(t, exclude=())
         lf = self.cfg['local_first']
         race = self.cfg['best_of_2'].get('enabled', True) and t['tier'] in self.cfg['best_of_2'].get('tiers', [])
         if lf.get('enabled') and t['tier'] in lf.get('tiers', []) and not race:
@@ -236,6 +236,12 @@ class TaskFlow(QualityMixin):
             self.db.event('local_first', t['id'], lane=lf['lane'], then=lane)
             lane = lf['lane']
         self._plan_quality(t, lane)          # oracle tests / best-of-2 triggers, then the lane
+
+    def _tier_lane(self, tier: str) -> str | None:
+        lane = (self.cfg.data.get('tier_lanes') or {}).get(tier) or TIER_LANE.get(tier)
+        if lane is not None and lane not in LANES:
+            raise ValueError(f'tier_lanes.{tier}: unknown lane {lane!r}')
+        return lane
 
     def _backend(self) -> str:
         return getattr(self.decider, 'backend', 'clm')
