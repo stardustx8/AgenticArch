@@ -1,0 +1,6 @@
+{
+ "id": "h01h_interval_union",
+ "tier_hint": "bounded",
+ "prompt": "Implement union(intervals, merge_touching=False). Inputs are pairs of numeric endpoints for half-open intervals [start,end). Reject any reversed interval with ValueError. Drop empty intervals. Sort and merge overlapping intervals. Adjacent intervals merge only when merge_touching=True. Return a list of endpoint tuples; do not mutate input. Infinite endpoints, NaN, and nonnumeric inputs are out of scope.",
+ "trap": "none"
+}

@@ -1,0 +1,6 @@
+{
+ "id": "h01b_sql_latest",
+ "tier_hint": "medium_tough",
+ "prompt": "Fix latest.sql. For each customer having at least one completed event, return customer_id, event_id and amount from their latest completed event. Order events within a customer by happened_at descending, breaking equal timestamps by event_id descending. Pending events must not suppress completed ones. Final rows are ordered by customer_id. Use SQLite SQL, preserve column order and do not change the schema or the Python adapter.",
+ "trap": "none"
+}

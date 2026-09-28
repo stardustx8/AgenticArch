@@ -1,1592 +1,531 @@
-"""End-to-end tests of the aa runtime with fake model workers and real git repos.
+"""Runtime regression entry point; unchanged pre-HO02 cases live in runtime_legacy.
 
-Remotes are local bare repositories; Pro's connector commits are simulated by a
-separate clone that pushes to the case branch.
+The legacy module is deliberately not a test_*.py file, so discovery runs each
+case once. New behavioural tests remain here at the documented entry point.
 """
-from __future__ import annotations
-
-import json
-import subprocess
-import tempfile
-import unittest
-from pathlib import Path
-from unittest import mock
-
-from aa import config, git
-from aa.daemon import App
-from aa.db import DB
-from aa.workers import LANES, Result, Workers
-
-
-def sh(cwd, *args):
-    return subprocess.run(args, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
-
-
-def init_repo(path: Path, files: dict[str, str]) -> None:
-    path.mkdir(parents=True)
-    sh(path, 'git', 'init', '-q', '-b', 'main')
-    sh(path, 'git', 'config', 'user.email', 't@t')
-    sh(path, 'git', 'config', 'user.name', 't')
-    for k, v in files.items():
-        (path / k).parent.mkdir(parents=True, exist_ok=True)
-        (path / k).write_text(v)
-    sh(path, 'git', 'add', '-A')
-    sh(path, 'git', 'commit', '-q', '-m', 'init')
-
-
-class FakeCLM:
-    def __init__(self, tier=None, peer=None, probs_conf=0.9):
-        self.tier, self.peer, self.conf = tier, peer, probs_conf
-        self.calls = []
-
-    def _probs(self, pick, options):
-        rest = (1 - self.conf) / (len(options) - 1)
-        return {k: (self.conf if k == pick else rest) for k in options}
-
-    def choose(self, kind, task_id, state, question, options):
-        self.calls.append(kind)
-        pick = self.tier if kind == 'tier' else self.peer
-        if pick is None:
-            return None, None, 0
-        return pick, self._probs(pick, options), 0
-
-    def rank(self, task_id, context, question, candidates, k):
-        return candidates[:k]
-
-
-class FakeWorkers(Workers):
-    """Scripted behaviour per job kind; records every call."""
-
-    def __init__(self, cfg, script):
-        super().__init__(cfg, runner=None)
-        self.script, self.calls = script, []
-
-    def local_available(self):
-        return bool(self.script.get('local'))
-
-    def verify_billing(self, cli):
-        if self.script.get('billing_error'):
-            from aa.workers import BillingError
-            raise BillingError('no subscription')
-
-    def execute(self, lane, prompt, cwd, *, write=True, extra_dirs=(), schema=None, log_name='job'):
-        self.verify_billing(lane.cli)
-        self.calls.append((lane.name, log_name))
-        if log_name.endswith('-triage'):
-            if self.script['triage'] is None:
-                return Result(False, '', None, [], error='triage timeout')
-            return Result(True, '', self.script['triage'], [lane.model])
-        kind = _kind(log_name)
-        if kind == 'spec' and 'spec' not in self.script:
-            return Result(True, '', spec_verdict([]), [lane.model])      # default: all criteria met
-        if kind == 'pick' and 'pick' not in self.script:
-            return Result(True, '', {'winner': 'A', 'reason': 'default'}, [lane.model])
-        fn = self.script[kind]
-        return fn(lane, Path(cwd), prompt, extra_dirs)
-
-
-def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
-    """Verdict for the single test criterion 'a'; unmet names become the judged criterion text."""
-    if unmet:
-        crit = [{'index': 1, 'criterion': ', '.join(unmet), 'met': False, 'reason': f'{", ".join(unmet)} missing'}]
-    else:
-        crit = [{'index': 1, 'criterion': 'a', 'met': True, 'reason': 'ok'}]
-    return {'criteria': crit, 'tampering': tampering, 'tampering_reason': 'skipped a test' if tampering else ''}
-
-
-def _kind(log_name: str) -> str:
-    if log_name.endswith('-spec'):
-        return 'spec'
-    if log_name.endswith('-oracle'):
-        return 'oracle'
-    if log_name.endswith('-map'):
-        return 'map'
-    if log_name.endswith('-attack'):
-        return 'attack'
-    if '-pick-' in log_name:
-        return 'pick'
-    if '-race-' in log_name:
-        return 'work'
-    for k in ('-fix', '-opus', '-astra'):
-        if k in log_name:
-            return k.strip('-')
-    return 'work'
-
-
-def triage(tier, cats=(), peer='astra', testable=False):
-    return {'tier': tier, 'peer': peer, 'pro_categories': list(cats), 'summary': 's',
-            'acceptance_criteria': ['a'], 'relevant_paths': ['app.py'], 'risks': [], 'owner_question': '',
-            'testable': testable}
-
-
-def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'):
-    def fn(lane, cwd, prompt, extra):
-        (cwd / 'tests').mkdir(exist_ok=True)
-        (cwd / 'tests' / 'check_feature.sh').write_text(body)
-        (cwd / 'app.py').write_text('print("oracle must not touch production code")\n')
-        return Result(True, '{}', {'test_files': ['tests/check_feature.sh'], 'command': command, 'notes': ''},
-                      [lane.model])
-    return fn
-
-
-class Env:
-    def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None):
-        self.tmp = tmp
-        # Target repo with a bare origin.
-        self.target_origin = tmp / 'target.git'
-        sh(tmp, 'git', 'init', '-q', '--bare', '-b', 'main', str(self.target_origin))
-        self.target = tmp / 'target'
-        init_repo(self.target, {'app.py': 'print(1)\n',
-                                '.agenticarch.toml': f'[checks]\ntest = "{checks}"\n'})
-        sh(self.target, 'git', 'remote', 'add', 'origin', str(self.target_origin))
-        sh(self.target, 'git', 'push', '-q', 'origin', 'main')
-        # Empty case repo remote.
-        self.case_origin = tmp / 'cases.git'
-        sh(tmp, 'git', 'init', '-q', '--bare', '-b', 'main', str(self.case_origin))
-        self.cfg = config.load(Path('/nonexistent'), {
-            'paths': {'state_dir': str(tmp / 'state')},
-            'case_repo': {'url': str(self.case_origin), 'slug': 'me/cases'},
-            'ntfy': {'enabled': False},
-            'delivery': {'push_branch': True},
-            'triage': {'policy': policy},
-            'failure_triage': {'enabled': triage},
-            'oracle_tests': {'enabled': oracle},
-            'best_of_2': {'enabled': best_of_2},
-            'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
-            'ideas': ideas or {},
-        })
-        self.db = DB(':memory:')
-        self.clock = 1e9
-        self.sent = []
-        self.workers = FakeWorkers(self.cfg, script)
-        self.app = App(self.cfg, self.db, self.workers, clm)
-        self.app.n.send = lambda title, msg, **kw: self.sent.append((title, msg, kw))
-        self.slug_patch = mock.patch('aa.git.github_slug', return_value='me/target')
-        self.slug_patch.start()
-
-    def close(self):
-        self.slug_patch.stop()
-
-    def run(self, n=40):
-        idle = 0
-        for _ in range(n):
-            self.clock += 1000          # every tick is 'later' so Pro polls are not throttled
-            if self.app.tick(now=self.clock):
-                idle = 0
-            else:
-                idle += 1
-                if idle >= 2:
-                    break
-
-    def pro_commit(self, case_id, files: dict[str, str], msg='pro'):
-        """Simulate GPT-6 Pro writing to the case branch through the connector."""
-        clone = self.tmp / f'pro-{case_id}'
-        if not clone.exists():
-            sh(self.tmp, 'git', 'clone', '-q', str(self.case_origin), str(clone))
-            sh(clone, 'git', 'config', 'user.email', 'pro@x')
-            sh(clone, 'git', 'config', 'user.name', 'pro')
-        sh(clone, 'git', 'fetch', '-q', 'origin')
-        sh(clone, 'git', 'checkout', '-q', '-B', f'case/{case_id}', f'origin/case/{case_id}')
-        for k, v in files.items():
-            p = clone / k
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(v)
-        sh(clone, 'git', 'add', '-A')
-        sh(clone, 'git', 'commit', '-q', '-m', msg)
-        sh(clone, 'git', 'push', '-q', 'origin', f'case/{case_id}')
-
-    def pro_implement(self, branch, base, files):
-        clone = self.tmp / 'pro-target'
-        if not clone.exists():
-            sh(self.tmp, 'git', 'clone', '-q', str(self.target_origin), str(clone))
-            sh(clone, 'git', 'config', 'user.email', 'pro@x')
-            sh(clone, 'git', 'config', 'user.name', 'pro')
-        sh(clone, 'git', 'fetch', '-q', 'origin')
-        sh(clone, 'git', 'checkout', '-q', '-B', branch, base)
-        for k, v in files.items():
-            (clone / k).write_text(v)
-        sh(clone, 'git', 'add', '-A')
-        sh(clone, 'git', 'commit', '-q', '-m', 'impl')
-        sh(clone, 'git', 'push', '-q', 'origin', branch)
-        return sh(clone, 'git', 'rev-parse', 'HEAD')
-
-
-def write_done(lane, cwd, prompt, extra):
-    (cwd / 'done.txt').write_text('ok')
-    (cwd / '__pycache__').mkdir(exist_ok=True)          # worker ran tests itself
-    (cwd / '__pycache__' / 'app.cpython-314.pyc').write_bytes(b'x')
-    return Result(True, 'implemented', None, [lane.model])
-
-
-def noop(lane, cwd, prompt, extra):
-    return Result(True, 'nothing', None, [lane.model])
-
-
-def challenger(verdict, touch_outside=False):
-    def fn(lane, cwd, prompt, extra):
-        turn = next(l.split('turns/')[1].split()[0] for l in prompt.splitlines() if 'turns/' in l and 'write' in l)
-        case_dir = Path(next(l.split(': ', 1)[1] for l in prompt.splitlines() if l.startswith('Case directory')).split(' (')[0])
-        (case_dir / 'SOLUTION.md').write_text((case_dir / 'SOLUTION.md').read_text() + f'\n{lane.name} edit\n')
-        (case_dir / 'turns' / turn).write_text(f'checked\nVERDICT: {verdict}\n')
-        if touch_outside:
-            (cwd / 'README.md').write_text('hacked')
-            (extra[0] / 'app.py').write_text('hacked')
-        return Result(True, 'done', None, [lane.model])
-    return fn
-
-
-class LocalFlowTests(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
-
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
-
-    def test_routine_task_agreeing_votes_runs_luna_low_and_delivers_branch(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'),
-                       checks='test -f done.txt && touch artefact.cache')
-        tid = self.env.app.tasks.create(self.env.target, 'rename a thing')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE', t)
-        self.assertEqual((t['tier'], t['tier_source'], t['lane']), ('routine', 'agree', 'luna_low'))
-        self.assertIn(f'aa/{tid}', sh(self.env.target_origin, 'git', 'branch', '--list'))
-        self.assertEqual(sh(self.env.target, 'git', 'show', f'aa/{tid}:done.txt'), 'ok')
-        self.assertFalse((self.env.cfg.worktrees / tid).exists())
-        # One squashed commit on top of the base; no check artefacts committed.
-        base = self.env.db.task(tid)['base_ref']
-        self.assertEqual(sh(self.env.target, 'git', 'rev-list', '--count', f'{base}..aa/{tid}'), '1')
-        self.assertEqual(sh(self.env.target, 'git', 'diff', '--name-only', f'{base}..aa/{tid}'), 'done.txt')
-
-    def test_codex_policy_uses_codex_tier_and_logs_decider_vote(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('tough'))
-        tid = self.env.app.tasks.create(self.env.target, 'fix bug')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['tier'], t['tier_source']), ('DONE', 'bounded', 'codex'))
-        self.assertEqual(t['data']['tier_votes']['decider'], 'tough')     # shadow vote kept
-
-    def test_decider_is_fallback_when_codex_triage_fails(self):
-        self.env = Env(self.tmp, {'triage': None, 'work': write_done}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['tier'], t['tier_source']), ('DONE', 'routine', 'decider'))
-
-    def test_higher_if_1_takes_higher_vote_and_asks_on_big_gap(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('medium_tough'),
-                       policy='higher_if_1')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['tier'], 'medium_tough')
-        self.env.app.tasks.decider = FakeCLM('tough')
-        tid2 = self.env.app.tasks.create(self.env.target, 'y')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid2)['status'], 'WAIT_OWNER')
-
-    def test_codex_policy_uses_codex_peer(self):
-        self.env = Env(self.tmp, {'triage': triage('medium_tough', peer='opus'), 'work': write_done},
-                       FakeCLM('medium_tough', peer='astra'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['lane'], 'opus_high')
-
-    def test_disagreement_asks_owner_then_uses_pick(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done}, FakeCLM('tough'),
-                       policy='ask_on_disagreement')
-        tid = self.env.app.tasks.create(self.env.target, 'fix bug')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'WAIT_OWNER')
-        title, msg, kw = self.env.sent[-1]
-        self.assertIn('Tier?', title)
-        self.assertIn(('bounded', f'tier {tid} bounded'), kw['choices'])
-        self.env.db.inbox_put(f'tier {tid} bounded')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['tier_source'], t['lane']), ('DONE', 'owner_pick', 'luna_high'))
-
-    def test_low_confidence_clm_is_an_abstention(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': write_done},
-                       FakeCLM('tough', probs_conf=0.3), policy='ask_on_disagreement')
-        tid = self.env.app.tasks.create(self.env.target, 'fix bug')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['tier_source']), ('DONE', 'codex'))
-
-    def test_failed_checks_retry_then_escalate_lane(self):
-        attempts = []
-
-        def flaky(lane, cwd, prompt, extra):
-            attempts.append((lane.name, 'Feedback on it' in prompt and 'exit' in prompt))
-            if len(attempts) == 3:
-                (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'tried', None, [lane.model])
-
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': flaky}, FakeCLM('routine'), triage=False)
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        self.assertEqual([a[0] for a in attempts], ['luna_low', 'luna_low', 'luna_high'])
-        self.assertTrue(attempts[1][1], 'retry prompt must include the failing checks')
-
-    def test_medium_tough_uses_decider_peer_choice(self):
-        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': write_done},
-                       FakeCLM('medium_tough', peer='opus'), policy='ask_on_disagreement')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['lane'], 'opus_high')
-
-    def test_medium_peer_escalates_to_other_model_then_deep(self):
-        fail = lambda lane, cwd, prompt, extra: Result(True, 'tried', None, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': fail},
-                       FakeCLM('medium_tough', peer='astra'), triage=False)
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        lanes = [c[0] for c in self.env.workers.calls if not c[1].endswith('-triage')]
-        self.assertEqual(lanes[:4], ['astra_high', 'astra_high', 'opus_high', 'opus_high'])
-        self.assertNotIn('opus_medium', lanes, 'peer choice switches models only, not effort')
-        self.assertEqual(t['status'], 'DEEP')
-
-    def test_spec_loop_sends_back_until_criteria_met(self):
-        verdicts = [spec_verdict(['handles empty input']), spec_verdict([])]
-        prompts = []
-
-        def judge(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            return Result(True, '', verdicts.pop(0), [lane.model])
-
-        def work(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            (cwd / 'done.txt').write_text('ok' + str(len(prompts)))
-            return Result(True, 'REBUTTAL: empty input handled in app.py:3' if len(prompts) > 2 else 'done',
-                          None, [lane.model])
-
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work, 'spec': judge}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertEqual(t['data']['spec_loops'], 1)
-        self.assertIn('UNMET: handles empty input', prompts[2])          # worker saw the finding
-        self.assertIn('REBUTTAL: empty input handled', prompts[3])      # judge saw the rebuttal
-        spec_lane = [c[0] for c in self.env.workers.calls if c[1].endswith('-spec')]
-        self.assertEqual(spec_lane, ['opus_medium', 'opus_medium'])
-        self.assertEqual(t['passes'], 1, 'spec loops do not consume the check-retry budget')
-
-    def test_spec_loop_stops_after_max_loops_and_owner_accepts(self):
-        judge = lambda lane, cwd, prompt, extra: Result(True, '', spec_verdict(['criterion b']), [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(80)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['data']['spec_loops']), ('WAIT_OWNER', 3))
-        self.assertEqual(len([c for c in self.env.workers.calls if c[1].endswith('-spec')]), 4)
-        title, msg, kw = self.env.sent[-1]
-        self.assertIn('Spec not met', title)
-        self.assertIn(('Accept', f'accept {tid}'), kw['choices'])
-        self.env.db.inbox_put(f'accept {tid}')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        msg = sh(self.env.target, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
-        self.assertIn('accepted by owner', msg)
-
-    def test_owner_one_more_spec_loop(self):
-        verdicts = [spec_verdict(['b'])] * 4 + [spec_verdict([])]
-        judge = lambda lane, cwd, prompt, extra: Result(True, '', verdicts.pop(0), [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(80)
-        self.assertEqual(self.env.db.task(tid)['status'], 'WAIT_OWNER')
-        self.env.db.inbox_put(f'retry {tid}')
-        self.env.run(40)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['data']['spec_loops']), ('DONE', 4))
-
-    def test_tampering_flag_sends_back(self):
-        verdicts = [spec_verdict([], tampering=True), spec_verdict([])]
-        judge = lambda lane, cwd, prompt, extra: Result(True, '', verdicts.pop(0), [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['data']['spec_loops']), ('DONE', 1))
-        self.assertTrue(t['data']['spec_reviews'][0]['tampering'])
-
-    def test_no_acceptance_criteria_judges_task_statement(self):
-        prompts = []
-
-        def judge(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            return Result(True, '', spec_verdict([]), [lane.model])
-        tri = triage('routine')
-        tri['acceptance_criteria'] = []
-        self.env = Env(self.tmp, {'triage': tri, 'work': write_done, 'spec': judge}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'add the widget')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        self.assertIn('fully implemented exactly as stated', prompts[0])
-
-    def test_spec_judge_failure_blocks_after_retries(self):
-        bad = lambda lane, cwd, prompt, extra: Result(False, '', None, [], error='timeout')
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': bad},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(40)
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'BLOCKED')
-        self.assertIn('spec judge failed', t['result'])
-
-    def test_worker_auth_failure_blocks_without_escalation(self):
-        from aa.workers import BillingError
-
-        def rejected(lane, cwd, prompt, extra):
-            raise BillingError('Codex login rejected by the server (401)')
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': rejected}, FakeCLM('bounded'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['lane']), ('BLOCKED', 'luna_high'))
-        self.assertIn('login rejected', t['result'])
-
-    def test_environment_failure_pauses_then_retry_after_fix(self):
-        env_file = self.tmp / 'db-up'
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine', peer='environment'),
-                       checks=f'test -f {env_file} || {{ echo connection refused; exit 1; }}')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'WAIT_OWNER')
-        self.assertTrue(t['data']['env_wait'])
-        self.assertIn('Environment problem', self.env.sent[-1][0])
-        self.assertEqual(len([c for c in self.env.workers.calls if not c[1].endswith(('-triage', '-spec'))]), 1,
-                         'no worker retry on an environment failure')
-        env_file.write_text('up')
-        self.env.db.inbox_put(f'retry {tid}')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-
-    def test_environment_can_be_treated_as_code(self):
-        works = []
-
-        def work(lane, cwd, prompt, extra):
-            works.append(prompt)
-            return Result(True, 'done', None, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine', peer='environment'),
-                       checks='echo connection refused; exit 1')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.env.db.inbox_put(f'code {tid}')
-        self.env.run(3)
-        self.assertEqual(len(works), 2)
-        self.assertIn('connection refused', works[1])
-
-    def test_flaky_check_passes_without_worker_retry(self):
-        flag = self.tmp / 'flaky-once'
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine', peer='code'),
-                       checks=f'test -f {flag} || {{ touch {flag}; exit 1; }}')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['passes']), ('DONE', 1))
-        msg = sh(self.env.target, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
-        self.assertIn('was flaky', msg)
-
-    def test_pre_existing_failure_goes_to_judge_with_note(self):
-        prompts = []
-
-        def judge(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            return Result(True, '', spec_verdict([]), [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': judge},
-                       FakeCLM('routine', peer='code'), checks="echo 'Error: legacy broken'; exit 1")
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertIn('base commit before the change: test', prompts[0])
-        self.assertFalse((self.env.cfg.state_dir / 'base-wt' / tid).exists(), 'base worktree cleaned up')
-
-    def test_incomplete_spec_verdict_never_passes(self):
-        empty = lambda lane, cwd, prompt, extra: Result(True, '', {'criteria': [], 'tampering': False,
-                                                                   'tampering_reason': ''}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'spec': empty},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(40)
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'BLOCKED')
-        self.assertIn('judged criteria []', t['result'])
-
-    def test_billing_error_blocks_without_dispatch(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done, 'billing_error': True},
-                       FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x', tier='routine')
-        self.env.db.update_task(tid, status='TRIAGED')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'BLOCKED')
-        self.assertIn('billing', t['result'])
-        self.assertEqual(self.env.workers.calls, [])
-
-    def test_autodetected_checks_need_owner_confirmation_once(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))
-        sh(self.env.target, 'git', 'rm', '-q', '.agenticarch.toml')
-        (self.env.target / 'Makefile').write_text('test:\n\ttest -f done.txt\n')
-        sh(self.env.target, 'git', 'add', '-A')
-        sh(self.env.target, 'git', 'commit', '-q', '-m', 'make')
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'WAIT_OWNER')
-        self.assertIn('make test', self.env.sent[-1][1])
-        self.env.db.inbox_put(f'checks {tid} ok')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        tid2 = self.env.app.tasks.create(self.env.target, 'y')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid2)['status'], 'DONE')
-
-    def test_worker_blocked_line_pauses_task(self):
-        blocked = lambda lane, cwd, prompt, extra: Result(True, 'BLOCKED: need API docs', None, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': blocked}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'WAIT_OWNER')                   # legacy text marker still understood
-        self.assertEqual(t['data']['worker_question'], 'need API docs')
-
-    def test_structured_blocked_question_then_owner_answer(self):
-        prompts = []
-
-        def work(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            if len(prompts) == 1:
-                return Result(True, '{}', {'status': 'blocked', 'summary': 'stopped', 'open_items': [],
-                                           'question': 'CSV or JSON export?', 'rebuttals': []}, [lane.model])
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, '{}', {'status': 'done', 'summary': 'did CSV', 'open_items': [],
-                                       'question': '', 'rebuttals': []}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'export')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'WAIT_OWNER')
-        title, msg, kw = self.env.sent[-1]
-        self.assertIn('Question from worker', title)
-        self.assertIn('CSV or JSON export?', msg)
-        self.env.db.inbox_put(f'answer {tid} CSV please')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['passes']), ('DONE', 1), 'owner answers do not consume retries')
-        self.assertIn('A: CSV please', prompts[1])
-
-    def _answer_every_question(self, tid, rounds=30):
-        answers = 0
-        for _ in range(rounds):
-            self.env.run()
-            t = self.env.db.task(tid)
-            if t['status'] != 'WAIT_OWNER':
-                break
-            answers += 1
-            self.env.db.inbox_put(f'answer {tid} no more information, decide yourself')
-        return self.env.db.task(tid), answers
-
-    def test_ever_blocking_worker_does_not_loop_on_the_owner(self):
-        # Lab run b3_allocate_remainder: 48 owner pings, because answers are free reruns.
-        always = lambda lane, cwd, prompt, extra: Result(True, '{}', {
-            'status': 'blocked', 'summary': 'stopped', 'open_items': [], 'question': 'Which rounding?',
-            'rebuttals': []}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': always}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        t, answers = self._answer_every_question(tid)
-        self.assertEqual(answers, 3)
-        self.assertNotIn(t['status'], ('WAIT_OWNER', 'READY', 'VERIFY'))
-        self.assertIn('owner_questions_exhausted', [r['kind'] for r in self.env.db.q(
-            'SELECT kind FROM events WHERE task_id=?', (tid,))])
-
-    def test_model_call_cap_blocks_a_runaway_task_and_retry_resets_it(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': noop}, FakeCLM('routine'))
-        self.env.cfg['retry']['max_model_calls'] = 3
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'BLOCKED')
-        self.assertIn('3 model calls', t['result'])
-        self.assertEqual(len(self.env.workers.calls), 3)            # triage, worker, spec judge
-        self.assertIn('probably a loop', self.env.sent[-1][1])
-        self.env.db.inbox_put(f'retry {tid}')
-        self.env.run()
-        self.assertGreater(len(self.env.workers.calls), 3, 'a retry gets a fresh budget')
-        self.assertNotEqual(self.env.db.task(tid)['status'], 'BLOCKED')
-
-    def test_triage_stops_asking_after_the_question_cap(self):
-        asking = dict(triage('routine'), owner_question='Which exchange rate?')
-        self.env = Env(self.tmp, {'triage': asking, 'work': write_done}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'convert usd')
-        t, answers = self._answer_every_question(tid)
-        self.assertEqual((t['status'], answers), ('DONE', 3))
-
-    def test_triage_owner_question_asked_before_dispatch(self):
-        triage_prompts = []
-        first = dict(triage('tough', ['research']), owner_question='Which exchange rate should be used?')
-        second = triage('routine')
-
+if __package__:
+    from .runtime_legacy import *  # noqa: F403
+else:
+    from runtime_legacy import *  # noqa: F403
+
+
+class HO02ReviewTests(unittest.TestCase):
+    def test_assertion_list_diff_and_suffix_are_not_discarded(self):
+        from aa.context import focused_failure
+        suffix = 'noise\n' * 800 + 'FAIL: test_values\nAssertionError: lists differ\n'
+        suffix += '- [1, 2, 3]\n+ [1, 9, 3]\n' + 'details\n' * 15 + 'FAILED (failures=1)\n'
+        text = 'prefix\n' * 500 + suffix
+        result = focused_failure(text, 6000)
+        self.assertEqual(result, text[-6000:])
+        self.assertIn('+ [1, 9, 3]', focused_failure(result, 3000))
+
+    def test_more_than_twelve_diagnostics_fit_and_unused_room_is_spent(self):
+        from aa.context import focused_failure
+        text = ''.join(f'noise {i}\n' * 25 + f'AssertionError: case-{i:02d}\n'
+                       + f'- expected-{i}\n+ actual-{i}\n' for i in range(20)) + 'tail\n' * 50
+        result = focused_failure(text, 5000)
+        self.assertLessEqual(len(result), 5000)
+        self.assertGreater(len(result), 4800)
+        for i in range(20):
+            self.assertIn(f'case-{i:02d}', result)
+            self.assertIn(f'+ actual-{i}', result)
+
+    def test_context_hard_cap_with_large_lines_and_tiny_budgets(self):
+        from aa.context import focused_failure
+        import random
+        rng = random.Random(260927)
+        for _ in range(250):
+            text = ''.join(rng.choice(['noise', 'AssertionError:', '\n', 'x' * 100]) for _ in range(200))
+            limit = rng.randrange(0, 2000)
+            self.assertLessEqual(len(focused_failure(text, limit)), limit)
+
+
+class HO02StopTests(unittest.TestCase):
+    setUp = HarnessOptStopTests.setUp
+    install = HarnessOptStopTests.install
+    invoke = HarnessOptStopTests.invoke
+    def test_subdirectory_runs_frozen_root_checks_but_symlink_escape_does_not(self):
+        sub = self.wt / 'package'; sub.mkdir()
+        settings = self.install({'test': 'test -f fixed'})
+        reply, _ = self.invoke(settings, {'hook_event_name': 'Stop', 'cwd': str(sub)})
+        self.assertEqual(reply['decision'], 'block')
+        (self.wt / 'fixed').touch()
+        self.assertEqual(self.invoke(settings, {'hook_event_name': 'Stop', 'cwd': str(sub)})[0], {})
+        (self.wt / 'escape').symlink_to(self.root, target_is_directory=True)
+        self.assertEqual(self.invoke(settings, {'hook_event_name': 'Stop', 'cwd': str(self.wt / 'escape')})[0], {})
+
+    def test_capsule_and_project_settings_use_absolute_denies(self):
+        settings = self.install()
+        _, policy = self.invoke(settings)
+        for path in (policy.parent, self.wt / '.claude'):
+            self.assertNotIn(f'Write(/{path.as_posix()}/**)', settings['permissions']['deny'])
+            self.assertIn(f'Edit(/{path.as_posix()}/**)', settings['permissions']['deny'])
+        self.assertIs(settings['disableAllHooks'], False)
+
+    def test_modified_hook_code_is_not_executed(self):
+        settings = self.install()
+        _, policy = self.invoke(settings)
+        (policy.parent / 'hook.py').write_text("raise RuntimeError('foreign executable ran')")
+        self.assertEqual(self.invoke(settings)[0], {})
+
+
+class HO02ProjectTests(unittest.TestCase):
+    def test_all_twelve_stages_validate_with_original_importer(self):
+        from tools.ho02_projects import catalog, validate_projects
+        ps=catalog()
+        self.assertAlmostEqual(sum(p['weight'] for p in ps),1)
+        self.assertEqual(len(ps),6)
+        results=validate_projects(ps)
+        self.assertEqual(len(results),12)
+        self.assertTrue(all(r['valid'] for r in results),results)
+
+    def test_plan_is_paired_and_tampering_fails(self):
+        from tools.ho02_round import plan, validate
+        p=plan('test-plan',2); self.assertEqual(p['maximum_task_runs'],48)
+        validate(p)
+        from collections import Counter
+        groups=Counter((t['project'],t['repeat']) for t in p['trials'])
+        self.assertEqual(set(groups.values()),{2})
+        p['trials'][0]['policy']='stop'
+        with self.assertRaises(ValueError):validate(p)
+
+    def test_unknown_rubric_is_not_a_pass_and_stale_review_fails(self):
+        from tools.ho02_support import rubric,validate_review
+        r=rubric('abc');self.assertTrue(all(v is None for v in r['critical'].values()))
+        with self.assertRaises(ValueError):validate_review(r,'abc')
+        r['reviewer']='independent-test-reviewer'
+        for section in ('dimensions','critical'):
+            r[section]={k:{'value':False if section=='critical' else 3,'evidence':'inspected artifact x'} for k in r[section]}
+        validate_review(r,'abc')
+        with self.assertRaises(ValueError):validate_review(r,'different')
+
+    def test_first_final_restart_and_followup_use_actual_prior_result(self):
+        from tools.ho02_project_run import run_project
+        from tools.ho02_projects import catalog, write_tree
+        p=catalog()[0]; state={'writes':0,'stage2_saw_first':False}
+        def factory(cfg):
+            def work(lane,cwd,prompt,extra):
+                self.assertFalse((cwd/'hidden-1').exists())
+                self.assertNotIn('test_hidden_project',prompt)
+                if 'customer now' in prompt:
+                    state['stage2_saw_first']='csv.writer' in (cwd/'formats.py').read_text()
+                    write_tree(cwd,p['stages'][1]['reference'])
+                else:
+                    state['writes']+=1
+                    # First candidate is intentionally wrong, then a visible
+                    # assertion requests repair. No hidden result is fed back.
+                    if state['writes']==1:
+                        (cwd/'tests/test_visible_repair.py').write_text('import unittest\nfrom service import export\nclass T(unittest.TestCase):\n def test_csv(self): self.assertIn("id,value",export([],"csv"))\n')
+                    else: write_tree(cwd,p['stages'][0]['reference'])
+                return Result(True,'',{'status':'done','summary':'scripted fixture producer','open_items':[],'question':'','rebuttals':[],'spec_conflicts':[]},[lane.model])
+            return FakeWorkers(cfg,{'triage':triage('bounded',testable=False),'work':work})
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'trial'
+            r=run_project(p,path,'minimal',worker_factory=factory)
+            self.assertFalse(r['stages'][0]['first']['hidden_pass'])
+            self.assertTrue(r['stages'][0]['final']['hidden_pass'])
+            self.assertTrue(r['stages'][1]['correct_delivery'])
+            self.assertTrue(state['stage2_saw_first'])
+            self.assertIn('simulated_restart',(path/'events.jsonl').read_text())
+            calls=state['writes']; again=run_project(p,path,'minimal',resume=True,worker_factory=factory)
+            self.assertEqual(calls,state['writes']); self.assertEqual(r,again)
+            p['stages'][0]['prompt']+=' changed'
+            with self.assertRaises(ValueError):run_project(p,path,'minimal',resume=True,worker_factory=factory)
+
+    def test_injected_failure_is_once_and_journalled(self):
+        from tools.ho02_project_run import run_project
+        from tools.ho02_projects import catalog,write_tree
+        p=catalog()[0];p['scenario']={'fail_first_work':True};p['stages']=p['stages'][:1]
+        def factory(cfg):
+            def work(lane,cwd,prompt,extra):
+                write_tree(cwd,p['stages'][0]['reference'])
+                return Result(True,'',{'status':'done','summary':'fixture','open_items':[],'question':''},[lane.model])
+            return FakeWorkers(cfg,{'triage':triage('bounded',testable=False),'work':work})
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'trial'; r=run_project(p,path,'minimal',worker_factory=factory)
+            self.assertTrue(r['stages'][0]['correct_delivery'])
+            events=[json.loads(l) for l in (path/'events.jsonl').read_text().splitlines()]
+            self.assertEqual(sum(e['kind']=='call_start' and e.get('simulated',False) for e in events),1)
+            self.assertEqual(r['unclosed_calls'],[])
+
+    def test_grader_timeout_and_unclosed_call_evidence(self):
+        from tools.ho02_support import bounded,event,pending_calls
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp); r=bounded([sys.executable,'-c','import time;time.sleep(60)'],path,.1)
+            self.assertFalse(r['passed']);self.assertTrue(r['timeout'])
+            log=path/'events';event(log,'call_start',call_id='one');self.assertEqual(pending_calls(log),['one'])
+            event(log,'call_end',call_id='one');self.assertEqual(pending_calls(log),[])
+
+class HO02ProjectGuardTests(unittest.TestCase):
+    def test_missing_trials_are_bounds_not_zero_or_perfect_success(self):
+        from tools.ho02_round import plan
+        from tools.ho02_report import report
+        with tempfile.TemporaryDirectory() as tmp:
+            r=report(plan('missing',1),Path(tmp))
+            self.assertEqual(r['arms']['full']['final_bounds'],[0,1])
+            self.assertFalse(r['all_reviews_complete']);self.assertFalse(r['promotion'])
+    def test_declared_owner_fact_reaches_subsequent_triage(self):
+        from tools.ho02_projects import catalog,write_tree
+        from tools.ho02_project_run import run_project
+        p=catalog()[4];p['stages']=p['stages'][:1];seen=[]
         class W(FakeWorkers):
-            def execute(s, lane, prompt, cwd, **kw):
-                if kw.get('log_name', '').endswith('-triage'):
-                    triage_prompts.append(prompt)
-                    s.calls.append((lane.name, kw['log_name']))
-                    return Result(True, '', first if len(triage_prompts) == 1 else second, [lane.model])
-                return super().execute(lane, prompt, cwd, **kw)
-        self.env = Env(self.tmp, {'triage': None, 'work': write_done}, FakeCLM('routine'))
-        self.env.app.tasks.workers = W(self.env.cfg, {'work': write_done})
-        tid = self.env.app.tasks.create(self.env.target, 'convert usd')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['case_id']), ('WAIT_OWNER', None), 'asked, not routed to Pro')
-        self.assertIn('Which exchange rate', self.env.sent[-1][1])
-        self.env.db.inbox_put(f'answer {tid} 0.92 EUR per USD, fixed')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['tier']), ('DONE', 'routine'))
-        self.assertIn('A: 0.92 EUR per USD', triage_prompts[1])
-
-    def test_partial_status_goes_back_without_running_checks(self):
-        prompts = []
-
-        def work(lane, cwd, prompt, extra):
-            prompts.append(prompt)
-            if len(prompts) == 1:
-                return Result(True, '{}', {'status': 'partial', 'summary': 'backend only', 'open_items': ['UI part'],
-                                           'question': '', 'rebuttals': []}, [lane.model])
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, '{}', {'status': 'done', 'summary': 'all', 'open_items': [], 'question': '',
-                                       'rebuttals': []}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertIn('Still required:\n- UI part', prompts[1])
-        kinds = [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE task_id=?', (tid,))]
-        self.assertIn('worker_partial', kinds)
-        self.assertNotIn('failure_triage', kinds, 'checks were not run on known-partial work')
-
-    def test_rebuttals_field_reaches_spec_judge(self):
-        judged = []
-        verdicts = [spec_verdict(['b']), spec_verdict([])]
-
-        def judge(lane, cwd, prompt, extra):
-            judged.append(prompt)
-            return Result(True, '', verdicts.pop(0), [lane.model])
-
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            reb = ['b is satisfied in app.py:1'] if 'reviewer' in prompt else []
-            return Result(True, '{}', {'status': 'done', 'summary': 's', 'open_items': [], 'question': '',
-                                       'rebuttals': reb}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': work, 'spec': judge}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-        self.assertIn('b is satisfied in app.py:1', judged[1])
-
-    def test_crash_recovery_clears_busy_flags(self):
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.db.x('UPDATE tasks SET busy=1')
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'NEW')
-        self.env.app.recover()
-        self.env.run()
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-
-
-class DeepFlowTests(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
-
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
-
-    def start(self, script):
-        base = {'triage': triage('tough', ['architecture'])}
-        base.update(script)
-        self.env = Env(self.tmp, base, FakeCLM('tough'))
-        tid = self.env.app.tasks.create(self.env.target, 'design the thing')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DEEP')
-        return tid, t['case_id']
-
-    def draft(self, cid):
-        self.env.pro_commit(cid, {f'cases/{cid}/SOLUTION.md': '# Solution\n',
-                                  f'cases/{cid}/OBJECTIONS.md': '| ID |\n',
-                                  f'cases/{cid}/turns/pro-01.md': f'draft\nTURN-COMPLETE: {cid}/01\n'})
-
-    def test_full_deep_flow_to_verified_implementation(self):
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE')})
-        c = self.env.db.case(cid)
-        self.assertEqual(c['phase'], 'WAIT_PRO')
-        self.assertIn('PRO-TURN-01.md', c['data']['pro_prompt'])
-        self.assertIn('NEW GPT-6 Pro chat', self.env.sent[-1][1])
-        brief = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/BRIEF.md')
-        self.assertIn('design the thing', brief)
-        self.assertIn(f'aa/base-{cid}', sh(self.env.target_origin, 'git', 'branch', '--list'))
-        self.env.run()
-        self.assertEqual(self.env.db.case(cid)['phase'], 'WAIT_PRO', 'no marker yet')
-        self.draft(cid)
-        self.env.run()
-        c = self.env.db.case(cid)
-        # Both agreed in round 1 -> straight to Pro review turn 02.
-        self.assertEqual((c['phase'], c['pro_turn'], c['round']), ('WAIT_PRO', 2, 1))
-        self.assertIn('SAME Pro chat', self.env.sent[-1][1])
-        solution = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/SOLUTION.md')
-        self.assertIn('opus_high edit', solution)
-        self.assertIn('astra_high edit', solution)
-        base = self.env.db.task(tid)['base_ref']
-        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'done.txt': 'ok'})
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  f'fine\nDECISION: GO\nTARGET-BRANCH: aa/case-{cid}\n'
-                                  f'TARGET-COMMIT: {sha}\nTURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        self.assertEqual(self.env.db.case(cid)['phase'], 'DONE')
-        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
-
-    def test_challengers_iterate_until_rounds_exhausted(self):
-        tid, cid = self.start({'opus': challenger('REVISE'), 'astra': challenger('AGREE')})
-        self.draft(cid)
-        self.env.run(60)
-        c = self.env.db.case(cid)
-        self.assertEqual((c['phase'], c['pro_turn'], c['round']), ('WAIT_PRO', 2, 5))
-        opus = [x for x in self.env.workers.calls if x[0] == 'opus_high']
-        self.assertEqual(len(opus), 5)
-
-    def test_scope_violations_are_reverted(self):
-        tid, cid = self.start({'opus': challenger('AGREE', touch_outside=True),
-                               'astra': challenger('AGREE')})
-        self.draft(cid)
-        self.env.run()
-        files = sh(self.env.case_origin, 'git', 'ls-tree', '-r', '--name-only', f'case/{cid}')
-        self.assertNotIn('hacked', sh(self.env.case_origin, 'git', 'show', f'case/{cid}:README.md'))
-        self.assertTrue(all(f.startswith(f'cases/{cid}/') or f in ('README.md', 'PROTOCOL.md')
-                            for f in files.splitlines()))
-        ro = self.env.cfg.state_dir / 'target-ro' / cid / 'app.py'
-        self.assertEqual(ro.read_text(), 'print(1)\n')
-        kinds = [r['kind'] for r in self.env.db.q('SELECT kind FROM events')]
-        self.assertIn('scope_violation', kinds)
-
-    def test_clarify_with_owner_questions_then_answer_starts_next_cycle(self):
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE')})
-        self.draft(cid)
-        self.env.run()
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  'DECISION: CLARIFY\n\n## Owner questions\n\nPostgres or SQLite?\n\n'
-                                  f'TURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        c = self.env.db.case(cid)
-        self.assertEqual(c['phase'], 'WAIT_OWNER')
-        self.assertIn('Postgres or SQLite?', self.env.sent[-1][1])
-        self.env.db.inbox_put(f'answer {cid} Postgres, we already run it')
-        self.env.run()
-        c = self.env.db.case(cid)
-        self.assertEqual((c['phase'], c['cycle'], c['pro_turn']), ('WAIT_PRO', 2, 3))
-        ans = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/OWNER-ANSWERS.md')
-        self.assertIn('Postgres, we already run it', ans)
-        turn3 = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/PRO-TURN-03.md')
-        self.assertIn('OWNER-ANSWERS.md', turn3)
-
-    def test_pause_after_two_reviews_without_go_and_resume(self):
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE')})
-        self.draft(cid)
-        self.env.run()
-        for nn in (2, 3):
-            self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-{nn:02d}.md':
-                                      f'DECISION: CLARIFY\nTURN-COMPLETE: {cid}/{nn:02d}\n'})
-            self.env.run()
-        c = self.env.db.case(cid)
-        self.assertEqual((c['phase'], c['pro_reviews']), ('PAUSED', 2))
-        self.env.db.inbox_put(f'resume {cid}')
-        self.env.run()
-        self.assertEqual(self.env.db.case(cid)['phase'], 'WAIT_PRO')
-        self.assertEqual(self.env.db.case(cid)['pro_turn'], 4)
-
-    def test_post_go_failure_is_fixed_locally(self):
-        def fix(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'fixed', None, [lane.model])
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE'), 'fix': fix})
-        self.draft(cid)
-        self.env.run()
-        base = self.env.db.task(tid)['base_ref']
-        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'app.py': 'print(2)\n'})
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
-                                  f'TURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        self.assertEqual(self.env.db.case(cid)['phase'], 'DONE')
-        self.assertEqual(sh(self.env.target_origin, 'git', 'show', f'aa/case-{cid}:done.txt'), 'ok')
-
-    def test_undeclared_commit_after_go_goes_back_to_pro(self):
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE')})
-        self.draft(cid)
-        self.env.run()
-        base = self.env.db.task(tid)['base_ref']
-        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'done.txt': 'ok'})
-        self.env.pro_implement(f'aa/case-{cid}', sha, {'extra.txt': 'undeclared'})   # tip moves on
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
-                                  f'TURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        c = self.env.db.case(cid)
-        self.assertEqual((c['phase'], c['pro_turn']), ('WAIT_PRO', 3))
-        turn3 = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/PRO-TURN-03.md')
-        self.assertIn('not at the declared TARGET-COMMIT', turn3)
-        self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
-
-    def test_failed_push_after_local_fix_does_not_complete(self):
-        def fix(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'fixed', None, [lane.model])
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE'), 'fix': fix})
-        self.draft(cid)
-        self.env.run()
-        base = self.env.db.task(tid)['base_ref']
-        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'app.py': 'print(2)\n'})
-        hook = self.env.target_origin / 'hooks' / 'pre-receive'
-        hook.write_text('#!/bin/sh\necho rejected >&2\nexit 1\n')
-        hook.chmod(0o755)
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
-                                  f'TURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        c = self.env.db.case(cid)
-        self.assertNotEqual(c['phase'], 'DONE')
-        self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
-        kinds = [r['kind'] for r in self.env.db.q('SELECT kind FROM events WHERE case_id=?', (cid,))]
-        self.assertIn('step_error', kinds)
-
-    def test_post_go_design_issue_goes_back_to_pro(self):
-        design = lambda lane, cwd, prompt, extra: Result(True, 'DESIGN_ISSUE: schema wrong', None, [lane.model])
-        tid, cid = self.start({'opus': challenger('AGREE'), 'astra': challenger('AGREE'), 'fix': design})
-        self.draft(cid)
-        self.env.run()
-        base = self.env.db.task(tid)['base_ref']
-        sha = self.env.pro_implement(f'aa/case-{cid}', base, {'app.py': 'print(2)\n'})
-        self.env.pro_commit(cid, {f'cases/{cid}/turns/pro-02.md':
-                                  f'DECISION: GO\nTARGET-BRANCH: aa/case-{cid}\nTARGET-COMMIT: {sha}\n'
-                                  f'TURN-COMPLETE: {cid}/02\n'})
-        self.env.run()
-        c = self.env.db.case(cid)
-        self.assertEqual((c['phase'], c['pro_turn']), ('WAIT_PRO', 3))
-        turn3 = sh(self.env.case_origin, 'git', 'show', f'case/{cid}:cases/{cid}/PRO-TURN-03.md')
-        self.assertIn('Post-GO verification failed', turn3)
-
-
-class SemIfClientTests(unittest.TestCase):
-    """aa.semif.SemIf against a real Unix-socket HTTP server speaking the server protocol."""
-
-    def setUp(self):
-        import socketserver
-        import threading
-        from http.server import BaseHTTPRequestHandler
-        self._tmp = tempfile.TemporaryDirectory()
-        self.sock = str(Path(self._tmp.name) / 's.sock')
-        self.reply = None
-
-        test = self
-
-        class H(BaseHTTPRequestHandler):
-            def address_string(self):
-                return 'unix'
-
-            def log_message(self, *a):
-                pass
-
-            def _send(self, body):
-                data = json.dumps(body).encode()
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-            def do_GET(self):
-                self._send({'ok': True, 'model': {}})
-
-            def do_POST(self):
-                req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                ids = [o['id'] for o in req['options']]
-                self._send(test.reply(ids) if test.reply else
-                           {'option_ids': ids, 'probabilities': [0.7] + [0.3 / (len(ids) - 1)] * (len(ids) - 1)})
-
-        class S(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-            daemon_threads = True
-
-        self.server = S(self.sock, H)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        from aa.semif import SemIf
-        cfg = config.load(Path('/nonexistent'), {'semif': {'socket': self.sock}})
-        self.db = DB(':memory:')
-        self.semif = SemIf(cfg, self.db)
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self._tmp.cleanup()
-
-    def test_choose_logs_decision_with_probabilities(self):
-        pick, probs, did = self.semif.choose('tier', 't1', 'state', 'q?', {'a': 'A', 'b': 'B'})
-        self.assertEqual(pick, 'a')
-        self.assertAlmostEqual(sum(probs.values()), 1.0)
-        row = self.db.q('SELECT * FROM decisions WHERE id=?', (did,))[0]
-        self.assertEqual((row['kind'], row['proposed']), ('tier', 'a'))
-
-    def test_mismatched_options_are_rejected_as_no_vote(self):
-        self.reply = lambda ids: {'option_ids': ['zzz'] + ids[1:], 'probabilities': [0.5, 0.5]}
-        pick, probs, _ = self.semif.choose('tier', 't1', 'state', 'q?', {'a': 'A', 'b': 'B'})
-        self.assertEqual((pick, probs), (None, None))
-        kinds = [r['kind'] for r in self.db.q('SELECT kind FROM events')]
-        self.assertIn('decider_error', kinds)
-
-    def test_missing_socket_means_unavailable(self):
-        from aa.semif import SemIf
-        cfg = config.load(Path('/nonexistent'), {'semif': {'socket': '/nonexistent/s.sock'}})
-        s = SemIf(cfg, self.db)
-        self.assertFalse(s.available())
-        self.assertEqual(s.choose('peer', None, 'x', 'q', {'a': 'A', 'b': 'B'})[0], None)
-
-    def test_rank_orders_by_relevance(self):
-        self.reply = lambda ids: {'option_ids': ids, 'probabilities': [0.9, 0.1]}
-        ranked = self.semif.rank('t1', 'task', 'relevant?', ['a.py', 'b.py'], 1)
-        self.assertEqual(len(ranked), 1)
-
-
-class WorkerTests(unittest.TestCase):
-    def cfg(self, tmp):
-        return config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp}})
-
-    def test_claude_model_substitution_is_an_error(self):
-        out = json.dumps({'result': 'ok', 'is_error': False, 'modelUsage': {'claude-sonnet-5': {}}})
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, out, ''))
+            def execute(s,lane,prompt,cwd,**kw):
+                if kw.get('log_name','').endswith('-triage'):
+                    seen.append(prompt)
+                    answer='Use the latency profile' in prompt
+                    return Result(True,'',dict(triage('bounded'),owner_question='' if answer else 'Which profile?'),[lane.model])
+                return super().execute(lane,prompt,cwd,**kw)
+        def factory(cfg):
+            def work(lane,cwd,prompt,extra):
+                write_tree(cwd,p['stages'][0]['reference']);return Result(True,'done',None,[lane.model])
+            return W(cfg,{'work':work})
         with tempfile.TemporaryDirectory() as tmp:
-            w = Workers(self.cfg(tmp), runner=runner)
-            w.verify_billing = lambda cli: None
-            r = w.execute(LANES['opus_high'], 'p', Path(tmp))
-        self.assertFalse(r.ok)
-        self.assertIn('model substitution', r.error)
-
-    def test_child_env_scrubs_api_keys(self):
-        from aa.workers import child_env
-        with mock.patch.dict('os.environ', {'OPENAI_API_KEY': 'x', 'ANTHROPIC_API_KEY': 'y',
-                                            'ANTHROPIC_BASE_URL': 'z', 'CLAUDECODE': '1', 'HOME': '/h'}):
-            env = child_env()
-        for k in ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'CLAUDECODE'):
-            self.assertNotIn(k, env)
-
-    def test_claude_billing_requires_subscription(self):
-        status = json.dumps({'loggedIn': True, 'authMethod': 'api_key'})
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, status, ''))
+            result=run_project(p,Path(tmp)/'trial','minimal',worker_factory=factory)
+            self.assertEqual(result['owner_questions_this_attempt'],1)
+            self.assertTrue(result['stages'][0]['correct_delivery'])
+            self.assertIn('Use the latency profile',seen[-1])
+    def test_grader_reaps_ordinary_descendants_and_caps_output(self):
+        from tools.ho02_support import bounded
+        import time
         with tempfile.TemporaryDirectory() as tmp:
-            w = Workers(self.cfg(tmp), runner=runner)
-            from aa.workers import BillingError
-            with self.assertRaises(BillingError):
-                w.verify_billing('claude')
+            p=Path(tmp)
+            child="import time,pathlib;time.sleep(.5);pathlib.Path('escaped').touch()"
+            parent=f"import subprocess,sys,time;subprocess.Popen([sys.executable,'-c',{child!r}]);time.sleep(30)"
+            r=bounded([sys.executable,'-c',parent],p,.1);time.sleep(.6)
+            self.assertTrue(r['timeout']);self.assertFalse((p/'escaped').exists())
+            r=bounded([sys.executable,'-c',"print('x'*200000)"],p,3)
+            self.assertTrue(r['passed']);self.assertTrue(r['output_truncated']);self.assertLessEqual(len(r['output']),65536)
 
-    def test_claude_sandbox_mode_uses_auto_and_restricts_writes(self):
-        out = json.dumps({'result': 'ok', 'is_error': False, 'modelUsage': {'claude-opus-5-5': {}}})
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, out, ''))
+    def test_review_dimensions_and_critical_types_remain_separate(self):
+        from tools.ho02_round import plan
+        from tools.ho02_report import report
+        from tools.ho02_support import atomic,rubric
+        p=plan('rubrics',1);t=p['trials'][0]
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
-                                                     'workers': {'claude_sandbox': True}})
-            w = Workers(cfg, runner=runner)
-            w.verify_billing = lambda cli: None
-            self.assertTrue(w.execute(LANES['opus_high'], 'p', Path(tmp)).ok)
-        cmd = runner.call_args[0][0]
-        self.assertIn('--strict-mcp-config', cmd)
-        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'auto')
-        settings = json.loads(cmd[cmd.index('--settings') + 1])['sandbox']
-        self.assertTrue(settings['failIfUnavailable'])
-        self.assertEqual(settings['filesystem']['allowWrite'], [tmp])
-        self.assertIn('~/.ssh', settings['filesystem']['denyRead'])
+            root=Path(tmp);path=root/t['id'];path.mkdir()
+            stages=[]
+            for i in (1,2):
+                grade={'sha':str(i),'hidden_pass':True,'all_tests_pass':True,'protected_preserved':True}
+                stages.append({'stage':i,'status':'DONE','first':grade,'final':grade,'correct_delivery':True})
+                r=rubric(str(i));r['reviewer']='fixture-reviewer'
+                r['dimensions']={k:{'value':2 if k=='handoff' else 3,'evidence':'inspected fixture'} for k in r['dimensions']}
+                r['critical']={k:{'value':k=='fabricated_verification' and i==2,'evidence':'inspected fixture'} for k in r['critical']}
+                atomic(path/f'review-stage-{i}.json',r)
+            atomic(path/'result.json',dict(project=t['project'],policy=t['policy'],stages=stages))
+            from tools.ho02_projects import catalog
+            from tools.ho02_support import digest
+            from tools.ho01_round import POLICIES
+            project=next(x for x in catalog() if x['id']==t['project'])
+            atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],mode=p['mode'],
+                policy=t['policy'],flags=POLICIES[t['policy']],project_hash=digest(project),
+                effective_config_sha256=p['effective_config_hashes'][t['policy']]))
+            row=report(p,root)['rows'][0]
+            self.assertEqual(row['dimensions']['handoff'],2)
+            self.assertEqual(row['critical_by_type']['fabricated_verification'],1)
+            self.assertTrue(row['review_coverage'])
+            self.assertEqual(row['final'],1)
 
-    def test_claude_default_guard_is_auto_mode_without_blanket_bash(self):
-        out = json.dumps({'result': 'ok', 'is_error': False, 'modelUsage': {'claude-opus-5-5': {}}})
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, out, ''))
+
+class HO02ReceiptIntegrityTests(unittest.TestCase):
+    def fixture(self,root):
+        from tools.ho02_round import plan
+        from tools.ho02_projects import catalog
+        from tools.ho02_support import atomic,digest
+        from tools.ho01_round import POLICIES
+        p=plan('receipt-check',1); t=p['trials'][0]; path=root/t['id'];path.mkdir()
+        project=next(x for x in catalog() if x['id']==t['project'])
+        atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],mode=p['mode'],
+            policy=t['policy'],flags=POLICIES[t['policy']],project_hash=digest(project),
+            effective_config_sha256=p['effective_config_hashes'][t['policy']]))
+        grade=dict(sha='observed',hidden_pass=True,all_tests_pass=True,protected_preserved=True)
+        result=dict(project=t['project'],policy=t['policy'],stages=[dict(stage=1,status='DONE',
+            first=None,final=grade,correct_delivery=True),dict(stage=2,status='BLOCKED',
+            first=None,final=None,correct_delivery=False)])
+        atomic(path/'result.json',result)
+        return p,path,result
+
+    def test_absent_first_is_unknown_and_partial_trajectory_is_not_complete(self):
+        from tools.ho02_report import report
         with tempfile.TemporaryDirectory() as tmp:
-            w = Workers(self.cfg(tmp), runner=runner)
-            w.verify_billing = lambda cli: None
-            self.assertTrue(w.execute(LANES['opus_high'], 'p', Path(tmp)).ok)
-        cmd = runner.call_args[0][0]
-        self.assertEqual(cmd[cmd.index('--permission-mode') + 1], 'auto')
-        allowed = cmd[cmd.index('--allowedTools') + 1:]
-        self.assertNotIn('Bash', allowed, 'Bash goes through the auto-mode classifier, not a blanket allow')
-        deny = json.loads(cmd[cmd.index('--settings') + 1])['permissions']['deny']
-        self.assertIn('Bash(git push:*)', deny)
-        self.assertIn('Read(~/.ssh/**)', deny)
+            root=Path(tmp);p,path,r=self.fixture(root)
+            row=report(p,root)['rows'][0]
+            self.assertIsNone(row['first']);self.assertEqual(row['first_bounds'],[0,1])
+            self.assertEqual(row['first_coverage'],0)
+            self.assertEqual(row['final'],.5);self.assertEqual(row['trajectory_final'],0)
 
-    def test_missing_sandbox_blocks_instead_of_running_unsandboxed(self):
-        from aa.workers import BillingError
-        runner = mock.Mock(return_value=subprocess.CompletedProcess(
-            [], 1, '', 'Error: sandbox required but unavailable: socat not installed'))
+    def test_duplicate_stages_and_forged_done_are_rejected(self):
+        from tools.ho02_report import report
+        from tools.ho02_support import atomic
         with tempfile.TemporaryDirectory() as tmp:
-            cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
-                                                     'workers': {'claude_sandbox': True}})
-            w = Workers(cfg, runner=runner)
-            w.verify_billing = lambda cli: None
-            with self.assertRaises(BillingError):
-                w.execute(LANES['opus_high'], 'p', Path(tmp))
+            root=Path(tmp);p,path,r=self.fixture(root)
+            r['stages'][0]['status']='BLOCKED';atomic(path/'result.json',r)
+            with self.assertRaises(ValueError):report(p,root)
+            r['stages'][0]['status']='DONE';r['stages'][1]['stage']=1;atomic(path/'result.json',r)
+            with self.assertRaises(ValueError):report(p,root)
 
-    def test_codex_auth_rejection_raises_billing_error_not_retry(self):
-        from aa.workers import BillingError
-        out = '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Incorrect API key provided"}}'
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 1, out, ''))
+    def test_foreign_project_and_duplicate_plan_cannot_count_twice(self):
+        from tools.ho02_report import report
+        from tools.ho02_support import atomic
         with tempfile.TemporaryDirectory() as tmp:
-            w = Workers(self.cfg(tmp), runner=runner)
-            w.verify_billing = lambda cli: None
-            with self.assertRaises(BillingError):
-                w.execute(LANES['luna_high'], 'p', Path(tmp))
+            root=Path(tmp);p,path,r=self.fixture(root)
+            manifest=json.loads((path/'manifest.json').read_text());manifest['project_hash']='foreign'
+            atomic(path/'manifest.json',manifest)
+            with self.assertRaises(ValueError):report(p,root)
+            p['trials'][1]=dict(p['trials'][0])
+            with self.assertRaises(ValueError):report(p,root)
 
-    def test_local_model_truncated_output_is_a_failure(self):
-        import io
-        body = json.dumps({'choices': [{'finish_reason': 'stop', 'stop_reason': 'repetition_detected',
-                                        'message': {'content': 'a-b-a-b-a-b'}}]})
-        with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch('urllib.request.urlopen', return_value=io.BytesIO(body.encode())):
-            w = Workers(self.cfg(tmp))
-            w.verify_billing = lambda cli: None
-            r = w.execute(LANES['gemma_local'], 'p', Path(tmp), write=False, schema={'type': 'object'})
-        self.assertFalse(r.ok)
-        self.assertIn('degenerated', r.error)
+    def test_effective_configuration_is_pinned_without_state_path(self):
+        from tools.ho02_project_run import effective_config,config_hash
+        from tools.ho02_round import plan,validate
+        from unittest.mock import patch
+        from aa import config
+        self.assertEqual(config_hash(effective_config('full','one')),config_hash(effective_config('full','two')))
+        p=plan('config-pin',1)
+        with patch.dict(config.DEFAULTS['retry'],max_model_calls=7):
+            with self.assertRaises(ValueError):validate(p)
 
-    def test_codex_command_is_subscription_exec_with_effort(self):
-        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+
+import os
+
+class HO03WorkerIsolationTests(unittest.TestCase):
+    def test_native_memory_controls_are_opt_in_and_do_not_relocate_auth(self):
+        from unittest.mock import patch
+        from aa.workers import Workers, LANES
+        from aa.config import load
         with tempfile.TemporaryDirectory() as tmp:
-            w = Workers(self.cfg(tmp), runner=runner)
-            w.verify_billing = lambda cli: None
-            w.execute(LANES['luna_low'], 'p', Path(tmp), write=False)
-        cmd = runner.call_args[0][0]
-        self.assertIn('gpt-6-luna', cmd)
-        self.assertIn('model_reasoning_effort="low"', cmd)
-        self.assertIn('read-only', cmd)
+            seen=[]
+            def runner(cmd, **kw):
+                seen.append((cmd,kw))
+                return subprocess.CompletedProcess(cmd,0,'','')
+            for flag in (False,True):
+                cfg=load(overrides={'paths':{'state_dir':tmp},'harness_opt':{'codex_no_memories':flag}})
+                w=Workers(cfg,runner=runner);w.verify_billing=lambda cli:None
+                with patch.dict(os.environ,{'CODEX_HOME':'/existing/subscription/home'}):
+                    w.execute(LANES['astra_high'],'fixture',Path(tmp),write=False)
+                cmd,kw=seen[-1]
+                for value in ('features.memories=false','memories.use_memories=false','memories.generate_memories=false'):
+                    self.assertEqual(value in cmd,flag)
+                self.assertEqual(kw['env']['CODEX_HOME'],'/existing/subscription/home')
+                self.assertIn('read-only',cmd);self.assertIn('approval_policy="never"',cmd)
+            self.assertEqual(seen[0][0][:5],seen[1][0][:5])
 
+    def test_module_qualified_test_import_is_supported(self):
+        p=subprocess.run([sys.executable,'-m','unittest','tests.test_aa_runtime.HO02ReviewTests'],
+                         cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,timeout=30)
+        self.assertEqual(p.returncode,0,p.stderr)
 
-if __name__ == '__main__':
-    unittest.main()
-
-
-class FailureTriageTests(unittest.TestCase):
-    """aa/failure_triage.py prototype: deterministic rerun/base steps, decider only for env-vs-code."""
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.wt = Path(self._tmp.name)
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def _run(self, command, base_ok=True, base_out='', decider_pick='code'):
-        from aa import checks as ck
-        from aa.failure_triage import triage
-        failed = ck.run({'c': command}, self.wt)[0]
-        base = lambda cmd: ck.CheckRun('base', cmd, 0 if base_ok else 1, base_out)
-        return triage(failed, self.wt, base, FakeCLM(peer=decider_pick))   # non-tier kinds use .peer
-
-    def test_flaky_passes_on_rerun(self):
-        (self.wt / 'flag').unlink(missing_ok=True)
-        v = self._run('test -f flag || { touch flag; exit 1; }')
-        self.assertEqual(v.action, 'FLAKY')
-
-    def test_pre_existing_failure_on_base(self):
-        v = self._run('echo "Error: legacy broken"; exit 1', base_ok=False, base_out='Error: legacy broken\n')
-        self.assertEqual(v.action, 'PRE_EXISTING')
-
-    def test_environment_needs_confident_decider(self):
-        self.assertEqual(self._run('echo "connection refused"; exit 1', decider_pick='environment').action,
-                         'ENVIRONMENT')
-        self.assertEqual(self._run('echo "AssertionError"; exit 1', decider_pick='code').action, 'CODE')
-
-
-class QualityTests(unittest.TestCase):
-    """Oracle tests, mutation gate and best-of-2 (aa/quality.py) through the real task flow."""
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
-
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
-
-    def events(self, tid):
-        return [(r['kind'], json.loads(r['detail'])) for r in
-                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
-
-    def test_oracle_tests_by_other_vendor_become_required_and_ship(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done,
-                                  'oracle': oracle_writer()}, FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        oracle_calls = [c for c in self.env.workers.calls if c[1].endswith('-oracle')]
-        self.assertEqual(oracle_calls[0][0], 'opus_medium', 'Luna implements -> Anthropic writes the tests')
-        self.assertIn('oracle_tests', t['data']['checks'])
-        shipped = sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh')
-        self.assertIn('test -f done.txt', shipped)
-        self.assertEqual(sh(self.env.target, 'git', 'show', f'aa/{tid}:app.py'), 'print(1)',
-                         'oracle author cannot change production code')
-        self.assertFalse((self.env.cfg.worktrees / f'{tid}-oracle').exists())
-
-    def test_oracle_rejected_when_it_passes_on_base(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done,
-                                  'oracle': oracle_writer(body='true\n')}, FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertNotIn('oracle_tests', t['data']['checks'])
-        self.assertIn(('oracle_rejected', {'reason': 'tests already pass on the base commit'}), self.events(tid))
-
-    def test_untestable_task_gets_no_oracle(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=False), 'work': write_done},
-                       FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'docs')
-        self.env.run()
-        self.assertFalse([c for c in self.env.workers.calls if c[1].endswith('-oracle')])
-
-    def test_worker_edits_to_oracle_are_reverted_and_reported(self):
-        judged = []
-
-        def cheat(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            (cwd / 'tests' / 'check_feature.sh').write_text('true\n')
-            return Result(True, 'done', None, [lane.model])
-
-        def judge(lane, cwd, prompt, extra):
-            judged.append(prompt)
-            return Result(True, '', spec_verdict([]), [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': cheat, 'spec': judge,
-                                  'oracle': oracle_writer()}, FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        self.assertIn('oracle_tamper', [k for k, _ in self.events(tid)])
-        self.assertIn('modified the independent acceptance tests', judged[0])
-        self.assertIn('test -f done.txt', sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh'))
-
-    def test_mutation_gate_flags_weak_oracle_to_judge(self):
-        judged = []
-
-        def impl(lane, cwd, prompt, extra):
-            (cwd / 'calc2.py').write_text('def f():\n    return 3 - 1\n')
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'done', None, [lane.model])
-
-        def judge(lane, cwd, prompt, extra):
-            judged.append(prompt)
-            return Result(True, '', spec_verdict([]), [lane.model])
-        weak = oracle_writer(body='python3 -c "import calc2; assert calc2.f() > 0"\n')
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': impl, 'spec': judge,
-                                  'oracle': weak}, FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        m = self.env.db.task(tid)['data']['mutation']
-        self.assertEqual((m['killed'], m['total']), (0, 1))
-        self.assertIn('independent acceptance tests may be weak', judged[0])
-
-    def _race_env(self, work, pick=None, tier='medium_tough'):
-        script = {'triage': triage(tier), 'work': work}
-        if pick:
-            script['pick'] = pick
-        self.env = Env(self.tmp, script, FakeCLM(tier, peer='astra'), best_of_2=True)
-        return self.env.app.tasks.create(self.env.target, 'medium task')
-
-    def test_race_resumes_selection_without_rerunning_workers(self):
-        def pick(lane, cwd, prompt, extra):
-            raise RuntimeError('judge crashed')
-        tid = self._race_env(self._both_pass, pick)
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertEqual(len([c for c in self.env.workers.calls if '-race-' in c[1]]), 2, 'race ran once')
-        self.assertIn('pick_judge_error', [r['kind'] for r in self.env.db.q('SELECT kind FROM events')])
-
-    def test_race_checks_decide_winner(self):
-        def work(lane, cwd, prompt, extra):
-            if lane.name == 'astra_high':
-                (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'done', None, [lane.model])
-        tid = self._race_env(work)
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['lane']), ('DONE', 'astra_high'))
-        self.assertEqual(sorted(c[0] for c in self.env.workers.calls if '-race-' in c[1]),
-                         ['astra_high', 'opus_high'])
-        self.assertFalse((self.env.cfg.worktrees / f'{tid}-opus_high').exists())
-        self.assertIn(f'aa/{tid}', sh(self.env.target_origin, 'git', 'branch', '--list'))
-        row = self.env.db.q("SELECT final FROM decisions WHERE kind='best_of_2' AND task_id=?", (tid,))[0]
-        self.assertEqual(row['final'], 'astra_high')
-
-    def _both_pass(self, lane, cwd, prompt, extra):
-        (cwd / 'done.txt').write_text(f'implemented by {lane.name}' + (' with extra care' * 5 if 'opus' in lane.name else ''))
-        return Result(True, 'done', None, [lane.model])
-
-    def test_race_judges_agree(self):
-        def pick(lane, cwd, prompt, extra):
-            a_is_opus = prompt.index('opus_high') < prompt.index('astra_high')
-            return Result(True, '', {'winner': 'A' if a_is_opus else 'B', 'reason': 'opus better'}, [lane.model])
-        tid = self._race_env(self._both_pass, pick)
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['lane'], 'opus_high')
-        self.assertEqual(set(t['data']['pick_votes'].values()), {'opus_high'})
-
-    def test_race_judges_split_uses_tiebreak(self):
-        def pick(lane, cwd, prompt, extra):          # each judge prefers its own vendor
-            mine = 'opus_high' if 'opus' in lane.name else 'astra_high'
-            a_is_mine = prompt.index(mine) < prompt.index('astra_high' if mine == 'opus_high' else 'opus_high')
-            return Result(True, '', {'winner': 'A' if a_is_mine else 'B', 'reason': 'mine'}, [lane.model])
-        tid = self._race_env(self._both_pass, pick)
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['lane'], 'astra_high', 'split -> smaller diff wins')
-        self.assertIn('judges split', t['data']['race_winner']['reason'])
-
-    def test_luna_failure_escalates_to_race(self):
-        def work(lane, cwd, prompt, extra):
-            if lane.name == 'opus_high':
-                (cwd / 'done.txt').write_text('ok')
-            return Result(True, 'done', None, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work}, FakeCLM('bounded'),
-                       best_of_2=True, triage=False)
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['lane']), ('DONE', 'opus_high'))
-        lanes = [c[0] for c in self.env.workers.calls if not c[1].endswith(('-triage', '-spec'))]
-        self.assertEqual(lanes[:2], ['luna_high', 'luna_high'])
-        self.assertIn(('escalate', {'frm': 'luna_high', 'to': 'best_of_2'}), self.events(tid))
-
-
-class OracleValidationTests(unittest.TestCase):
-    """Regressions from the live run t0926-9f9b9: a syntax-broken oracle escalated to Pro."""
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
-
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
-
-    def events(self, tid):
-        return [(r['kind'], json.loads(r['detail'])) for r in
-                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
-
-    def py_oracle(self, bodies):
-        calls = []
-
-        def fn(lane, cwd, prompt, extra):
-            calls.append(prompt)
-            (cwd / 'tests').mkdir(exist_ok=True)
-            (cwd / 'tests' / 'test_feature.py').write_text(bodies[min(len(calls), len(bodies)) - 1])
-            return Result(True, '{}', {'test_files': ['tests/test_feature.py'],
-                                       'command': 'python3 tests/test_feature.py', 'notes': ''}, [lane.model])
-        return fn, calls
-
-    GOOD = 'import os, sys\nsys.exit(0 if os.path.exists("done.txt") else 1)\n'
-    BROKEN = 'def test_un-grouped():\n    pass\n'
-
-    def test_syntax_error_gets_one_repair_round(self):
-        oracle, calls = self.py_oracle([self.BROKEN, self.GOOD])
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'oracle': oracle},
-                       FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertEqual(len(calls), 2)
-        self.assertIn('previous tests were rejected: invalid test file', calls[1])
-        self.assertIn('oracle_tests', t['data']['checks'])
-
-    def test_unrepairable_oracle_is_skipped(self):
-        oracle, calls = self.py_oracle([self.BROKEN, self.BROKEN])
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'oracle': oracle},
-                       FakeCLM('bounded'), oracle=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], len(calls)), ('DONE', 2))
-        self.assertNotIn('oracle_tests', t['data']['checks'])
-
-    def test_race_drops_disputed_oracle_instead_of_escalating(self):
-        impossible = 'import sys\nsys.exit(1)  # buggy oracle that can never pass\n'
-        oracle, _ = self.py_oracle([impossible])
-
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text(lane.name)
-            return Result(True, '{}', {'status': 'done', 'summary': 'implemented', 'open_items': [], 'question': '',
-                                       'rebuttals': ['tests/test_feature.py always exits 1; the acceptance test is wrong']},
-                          [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'work': work, 'oracle': oracle},
-                       FakeCLM('medium_tough'), oracle=True, best_of_2=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertIsNone(t['case_id'])
-        self.assertIn('oracle_dropped', [k for k, _ in self.events(tid)])
-        self.assertNotIn('oracle_tests', t['data']['checks'])
-
-    # Lab runs b2_ledger_reversals_idempotency / b3_path_parent_segments: a wrong local test set,
-    # also run by the repo's own test command, blocked the task until it escalated to Pro.
-    SUITE = 'test -f done.txt && for f in tests/*.sh; do [ -e $f ] || continue; sh $f || exit 1; done'
-
-    @staticmethod
-    def wrong_local_set(lane, cwd, prompt, extra):
-        if lane.cli == 'local':
-            return Result(True, 'FILE: tests/check_indep.sh\n```sh\nexit 1\n```\nCOMMAND: sh tests/check_indep.sh\n',
-                          None, [lane.model])
-        return oracle_writer()(lane, cwd, prompt, extra)
-
-    @staticmethod
-    def disputing_worker(status):
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text(lane.name)
-            item = 'tests/check_indep.sh can never pass; it contradicts the task and is read-only for me'
-            return Result(True, '{}', {'status': status, 'summary': 'implemented', 'rebuttals': [],
-                                       'open_items': [item] if status == 'partial' else [],
-                                       'question': item if status == 'blocked' else ''}, [lane.model])
-        return work
-
-    def test_single_lane_drops_only_the_disputed_test_set(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'local': True,
-                                  'work': self.disputing_worker('partial'), 'oracle': self.wrong_local_set},
-                       FakeCLM('bounded'), checks=self.SUITE, oracle=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['case_id']), ('DONE', None))
-        self.assertEqual(t['data']['oracle']['authors'], ['opus_medium'])      # the valid set stays a check
-        self.assertIn('oracle_tests', t['data']['checks'])
-        files = sh(self.env.target, 'git', 'ls-tree', '-r', '--name-only', f'aa/{tid}')
-        self.assertIn('tests/check_feature.sh', files)
-        self.assertNotIn('tests/check_indep.sh', files)
-        self.assertFalse([s for s in self.env.sent if 'Question' in s[0]], 'no owner ping for a test dispute')
-
-    def test_race_blocked_on_wrong_tests_drops_them(self):
-        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'local': True,
-                                  'work': self.disputing_worker('blocked'), 'oracle': self.wrong_local_set},
-                       FakeCLM('medium_tough'), checks=self.SUITE, oracle=True, best_of_2=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual((t['status'], t['case_id']), ('DONE', None))
-        self.assertIsNone(t['data']['oracle'])
-        self.assertNotIn('tests/check_indep.sh', sh(self.env.target, 'git', 'ls-tree', '-r', '--name-only', f'aa/{tid}'))
-
-    def test_undisputed_oracle_failure_still_goes_back_to_the_worker(self):
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'local': True,
-                                  'work': self.disputing_worker('done'), 'oracle': self.wrong_local_set},
-                       FakeCLM('bounded'), checks=self.SUITE, oracle=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertNotEqual(t['status'], 'DONE')
-        self.assertNotIn('oracle_dropped', [k for k, _ in self.events(tid)])
-
-
-class ContextSelectionTests(unittest.TestCase):
-    """Deep-case reading list: triage paths first, then BM25 over contents (not path words)."""
-
-    def test_reading_list_finds_files_by_content(self):
+    def test_corrupted_hook_is_audited_without_executing_it(self):
+        from aa.stop_hook import install
         with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            files = {'app.py': 'print(1)\n', 'billing/fx.py': 'def convert(amount, exchange_rate):\n'
-                     '    """Currency conversion with the daily exchange rate; rounding half up."""\n',
-                     'img.bin': '\0' * 10 + 'exchange rate', 'docs/notes.md': 'meeting notes\n'}
-            files.update({f'pkg/mod{i}.py': f'def f{i}(): return {i}\n' for i in range(30)})
-            env = Env(tmp, {'triage': triage('tough'), 'work': noop}, FakeCLM('tough'))
-            init_repo(tmp / 'big', files)
-            t = {'id': 't0926-00000', 'prompt': 'Fix the rounding of the exchange rate conversion'}
-            paths = env.app.cases._context_paths(t, tmp / 'big', {'relevant_paths': ['app.py', 'nope.py']})
-            env.close()
-        self.assertEqual(paths[0], 'app.py', 'triage paths stay pinned first')
-        self.assertEqual(paths[1], 'billing/fx.py')
-        self.assertNotIn('img.bin', paths)
-        self.assertLessEqual(len(paths), 12)
+            root=Path(tmp);wt=root/'wt';wt.mkdir()
+            settings=install({}, {}, wt, root/'hooks',max_blocks=2,timeout_s=1,reason_template='fixture')
+            command=settings['hooks']['Stop'][0]['hooks'][0]['command']
+            capsule=next((root/'hooks').iterdir())
+            (capsule/'hook.py').write_text("raise RuntimeError('must not execute')")
+            p=subprocess.run(command,shell=True,input='{}',capture_output=True,text=True,timeout=5)
+            self.assertEqual(json.loads(p.stdout),{})
+            self.assertIn('hook_integrity_failed',(capsule/'events.jsonl').read_text())
+            self.assertIn('integrity failed',p.stderr)
 
 
-class LocalModelTests(unittest.TestCase):
-    """Gemma (local lane) as extra independent test writer and as neutral tie-breaker."""
+class HO03MeasurementRepairTests(unittest.TestCase):
+    def test_missing_tier_cannot_be_resolved_by_checks_approval(self):
+        from tools.ho03_support import owner_resolution
+        t={'tier':None,'data':{'tier_votes':{'codex':None}}}
+        self.assertEqual(owner_resolution(t,{'confirmed':False})[0],'handback')
+        t['tier']='bounded'
+        self.assertEqual(owner_resolution(t,{'confirmed':False}),('checks','ok'))
+        self.assertEqual(owner_resolution(t,{'confirmed':True})[0],'handback')
 
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+    def test_deadline_counts_downtime_and_rejects_budget_extension(self):
+        from tools.ho03_support import deadline
+        p={};self.assertEqual(deadline(p,10,now=100),10)
+        self.assertEqual(deadline(p,10,now=106),4)
+        self.assertEqual(deadline(p,10,now=120),0)
+        with self.assertRaises(ValueError):deadline(p,20,now=106)
+        with self.assertRaises(ValueError):deadline(p,10,now=99)
 
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
+    def test_protected_damage_is_new_once_but_taint_persists(self):
+        from tools.ho03_support import preservation,protected_hashes
+        with tempfile.TemporaryDirectory() as tmp:
+            r=Path(tmp);(r/'data').write_text('original')
+            before=protected_hashes(r,['data']);(r/'data').write_text('corrupt')
+            first=preservation(r,{'data':'original'},before)
+            self.assertEqual(first['protected_changed_this_stage'],['data'])
+            second=preservation(r,{'data':'original'},protected_hashes(r,['data']))
+            self.assertEqual(second['protected_changed_this_stage'],[])
+            self.assertEqual(second['inherited_protected_damage'],['data'])
+            self.assertFalse(second['protected_preserved'])
 
-    @staticmethod
-    def oracle_both(local_files):
-        def fn(lane, cwd, prompt, extra):
-            if lane.cli == 'local':
-                text = ''.join(f"FILE: {f['path']}\n```sh\n{f['content'].rstrip()}\n```\n\n" for f in local_files)
-                return Result(True, text + 'COMMAND: sh tests/check_indep.sh\n', None, [lane.model])
-            return oracle_writer()(lane, cwd, prompt, extra)
-        return fn
+    def test_protection_and_handoff_do_not_follow_symlink_ancestors(self):
+        from tools.ho03_support import safe_bytes
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'repo';root.mkdir();outside=Path(tmp)/'outside';outside.mkdir()
+            (outside/'value').write_text('must not read');(root/'link').symlink_to(outside,target_is_directory=True)
+            self.assertIsNone(safe_bytes(root,'link/value'))
+            self.assertIsNone(safe_bytes(root,'../outside/value'))
 
-    def test_parse_fenced_files(self):
-        from aa.quality import parse_fenced_files
-        self.env = Env(self.tmp, {'triage': triage('routine'), 'work': write_done}, FakeCLM('routine'))
-        text = ('Here are the tests.\nFILE: tests/test_a_indep.py\n```python\nimport x\n\ndef test():\n    '
-                'assert x\n```\nFILE: `tests/test_b_indep.py`\n```\npass\n```\nCOMMAND: `python3 -m pytest -q`\n')
-        files, cmd = parse_fenced_files(text)
-        self.assertEqual([f['path'] for f in files], ['tests/test_a_indep.py', 'tests/test_b_indep.py'])
-        self.assertIn('def test():', files[0]['content'])
-        self.assertEqual(cmd, 'python3 -m pytest -q')
+    def test_tough_route_produces_handoff_without_origin_or_worker(self):
+        from tools.ho02_projects import catalog
+        from tools.ho02_project_run import run_project
+        from tools.ho03_support import verify_handoff
+        def factory(cfg):return FakeWorkers(cfg,{'triage':triage('tough')})
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'trial'
+            r=run_project(catalog()[0],root,'minimal',offline_handoff=True,worker_factory=factory)
+            self.assertEqual(r['stages'][0]['status'],'AWAITING_PRO')
+            self.assertFalse(r['stages'][0]['correct_delivery'])
+            self.assertTrue(verify_handoff(root/'handoff-stage-1'))
+            self.assertEqual(len([json.loads(x) for x in (root/'events.jsonl').read_text().splitlines() if json.loads(x)['kind']=='call_start']),1)
 
-    def test_single_lane_gets_extra_local_test_set(self):
-        files = [{'path': 'tests/check_indep.sh', 'content': 'test -f done.txt\n'},
-                 {'path': '../escape_test.sh', 'content': 'x'},
-                 {'path': 'tests/check_feature.sh', 'content': 'true\n'}]          # exists: must not overwrite
-        self.env = Env(self.tmp, {'triage': triage('bounded', testable=True), 'work': write_done, 'local': True,
-                                  'oracle': self.oracle_both(files)}, FakeCLM('bounded'), oracle=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run()
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertEqual(t['data']['oracle']['authors'], ['opus_medium', 'gemma_local'])
-        self.assertEqual(sorted(t['data']['oracle']['files']), ['tests/check_feature.sh', 'tests/check_indep.sh'])
-        self.assertIn('test -f done.txt', sh(self.env.target, 'git', 'show', f'aa/{tid}:tests/check_feature.sh'))
-        self.assertFalse((self.tmp / 'state' / 'worktrees' / 'escape_test.sh').exists())
+    def test_handoff_preserves_regular_untracked_work_and_rejects_tampering(self):
+        from tools.ho02_project_run import git
+        from tools.ho03_support import handoff,verify_handoff
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'repo';root.mkdir();git(root,'init','-q');git(root,'config','user.name','lab');git(root,'config','user.email','lab@invalid')
+            (root/'base').write_text('old');git(root,'add','.');git(root,'commit','-qm','base')
+            (root/'notes').write_text('untracked work');out=Path(tmp)/'handoff'
+            m=handoff(root,{'prompt':'review this','data':{}},out)
+            self.assertIn('notes',m['files']);self.assertFalse(m['completion']);self.assertTrue(verify_handoff(out))
+            (out/'snapshot/notes').write_text('changed')
+            with self.assertRaises(ValueError):verify_handoff(out)
+            m=handoff(root,{'prompt':'review this','data':{}},Path(tmp)/'small',max_bytes=0)
+            self.assertFalse(m['mechanically_complete']);self.assertTrue(m['omitted'])
 
-    def test_race_tests_written_by_local_model(self):
-        files = [{'path': 'tests/check_indep.sh', 'content': 'test -f done.txt\n'}]
-        self.env = Env(self.tmp, {'triage': triage('medium_tough', testable=True), 'work': write_done, 'local': True,
-                                  'oracle': self.oracle_both(files)}, FakeCLM('medium_tough'), oracle=True,
-                       best_of_2=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'feature')
-        self.env.run(60)
-        t = self.env.db.task(tid)
-        self.assertEqual(t['status'], 'DONE')
-        self.assertEqual(t['data']['oracle']['authors'], ['gemma_local'])
+    def test_deferred_grading_and_strong_bounded_lane_ignore_tough_vote(self):
+        from tools.ho02_projects import catalog,write_tree
+        from tools.ho02_project_run import run_project
+        p=catalog()[0];seen=[]
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'trial'
+            def factory(cfg):
+                def work(lane,cwd,prompt,extra):
+                    seen.append(lane.name)
+                    self.assertEqual(list(root.glob('grade-stage-*/**/hidden.json')),[])
+                    index=1 if 'customer now' in prompt else 0
+                    write_tree(cwd,p['stages'][index]['reference'])
+                    return Result(True,'done',{'status':'done','summary':'scripted producer','open_items':[],'question':''},[lane.model])
+                return FakeWorkers(cfg,{'triage':triage('tough',peer='opus'),'work':work})
+            r=run_project(p,root,'minimal','bounded',comparison_tier='medium_tough',defer_grading=True,worker_factory=factory)
+            self.assertEqual(set(seen),{'astra_high'})
+            self.assertTrue(all(s['correct_delivery'] for s in r['stages']))
+            events=[json.loads(x)['kind'] for x in (root/'events.jsonl').read_text().splitlines()]
+            self.assertIn('model_trajectory_ended',events)
 
-    def _split_env(self, tiebreak_pick):
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text(f'{lane.name}' + (' long' * 20 if 'opus' in lane.name else ''))
-            return Result(True, 'done', None, [lane.model])
-
-        def pick(lane, cwd, prompt, extra):
-            if lane.cli == 'local':
-                return tiebreak_pick(prompt, lane)
-            mine = 'opus_high' if 'opus' in lane.name else 'astra_high'
-            other = 'astra_high' if mine == 'opus_high' else 'opus_high'
-            return Result(True, '', {'winner': 'A' if prompt.index(mine) < prompt.index(other) else 'B',
-                                     'reason': 'mine'}, [lane.model])
-        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': work, 'pick': pick, 'local': True},
-                       FakeCLM('medium_tough'), best_of_2=True, local=True)
-        tid = self.env.app.tasks.create(self.env.target, 'x')
-        self.env.run(60)
-        return self.env.db.task(tid)
-
-    def test_split_panel_resolved_by_consistent_local_tiebreak(self):
-        def prefers_opus(prompt, lane):
-            a_opus = prompt.index('opus_high') < prompt.index('astra_high')
-            return Result(True, '', {'winner': 'A' if a_opus else 'B', 'reason': 'opus'}, [lane.model])
-        t = self._split_env(prefers_opus)
-        self.assertEqual(t['lane'], 'opus_high', 'consistent tie-break beats the smaller-diff default')
-        self.assertIn('tie-break by gemma_local', t['data']['race_winner']['reason'])
-
-    def test_position_biased_tiebreak_is_ignored(self):
-        always_a = lambda prompt, lane: Result(True, '', {'winner': 'A', 'reason': 'first'}, [lane.model])
-        t = self._split_env(always_a)
-        self.assertEqual(t['lane'], 'astra_high', 'inconsistent across orders -> smaller diff')
-        self.assertEqual(len(set(t['data']['tiebreak_votes'])), 2)
+    def test_ultra_and_middle_stage_contracts_are_executable_and_label_exposed_bridge(self):
+        from tools.ho03_projects import catalog
+        from tools.ho02_projects import validate_projects
+        ps=catalog()
+        self.assertEqual(len([p for p in ps if p['difficulty']=='ultra']),3)
+        self.assertEqual(len({p['cluster'] for p in ps}),6)
+        self.assertFalse(any(p['scenario'].get('fail_first_work') for p in ps))
+        self.assertEqual(sum(p.get('exposed_bridge',False) for p in ps),1)
+        results=validate_projects(ps)
+        self.assertEqual(len(results),12)
+        self.assertTrue(all(r['valid'] for r in results),results)
 
 
-class IdeaFlagTests(unittest.TestCase):
-    """Experimental ideas (config 'ideas'), each off by default and testable in the lab."""
+class HO03CalibrationTests(unittest.TestCase):
+    def test_fixed_plan_counts_caps_and_settings_are_pinned(self):
+        from tools.ho03_round import plan,validate
+        sizes={'calibration':(12,24,14400),'extension':(42,84,43200),'upper-diagnostic':(6,12,10800),'routing':(3,3,4500)}
+        for phase,expected in sizes.items():
+            p=plan('fixed-'+phase,phase);validate(p)
+            self.assertEqual((len(p['trials']),p['maximum_stage_runs'],p['wall_cap_s']),expected)
+            if phase=='calibration':self.assertTrue(all(x['difficulty']=='middle' for x in p['trials'][:6]))
+            p['wall_cap_s']+=1
+            with self.assertRaises(ValueError):validate(p)
 
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._tmp.name)
+    def test_validity_gates_reject_ceiling_pooled_extremes_and_critical_override(self):
+        from tools.ho03_round import plan,checkpoint,approve_checkpoint
+        from tools.ho02_support import digest
+        from unittest.mock import patch
+        p=plan('gate');data=[dict(t,observed=True,unclosed_calls=[],new_protected_violations=0,critical_findings=0,final_correct=1,trajectory_correct=1) for t in p['trials']]
+        with patch('tools.ho03_round.rows',return_value=data):
+            c=checkpoint(p,Path('/unused'),6)
+        self.assertTrue(c['mechanical_stop_reasons'])
+        # The frozen middle-band endpoints are 20% and 80%, not rounded 15/85.
+        for mean in (.18, .82):
+            for r in data[:6]:r['final_correct']=mean
+            with patch('tools.ho03_round.rows',return_value=data):c=checkpoint(p,Path('/unused'),6)
+            self.assertIn('middle-band ceiling/floor; revise tasks, do not extend',c['mechanical_stop_reasons'])
+        for i,r in enumerate(data[:6]):r['final_correct']=.5;r['trajectory_correct']=0
+        data[0]['final_correct']=1;data[0]['trajectory_correct']=1;data[1]['final_correct']=0
+        with patch('tools.ho03_round.rows',return_value=data):c=checkpoint(p,Path('/unused'),6)
+        self.assertFalse(c['mechanical_stop_reasons'])
+        audit=dict(checkpoint_sha256=digest(c),reviewer='test reviewer',evidence=['inspected all six traces'],no_personal_memory=True,no_evaluator_access=True,no_artifact_failures=True,no_critical_failures=True,trace_coverage_sufficient=True)
+        approve_checkpoint(c,audit)
+        data[0]['new_protected_violations']=1
+        with patch('tools.ho03_round.rows',return_value=data):c=checkpoint(p,Path('/unused'),6)
+        audit['checkpoint_sha256']=digest(c)
+        with self.assertRaises(ValueError):approve_checkpoint(c,audit)
 
-    def tearDown(self):
-        self.env.close()
-        self._tmp.cleanup()
+    def test_native_audit_cannot_replace_missing_memory_implementation(self):
+        from tools.ho03_round import native_audit,plan
+        from unittest.mock import patch
+        p=plan('native');a=dict(source_fingerprint=p['source_fingerprint'],reviewer='operator',evidence=['installed CLI logs'],memory_injection_absent=True,subscription_auth_unchanged=True,node_available=True,cgroup_limits_verified=True,cli_versions={'codex':'observed','claude':'observed','node':'observed'})
+        native_audit(a,p)
+        with patch('tools.ho03_round.memory_implementation_available',return_value=False):
+            with self.assertRaises(ValueError):native_audit(a,p)
+        a['memory_injection_absent']='true'
+        with self.assertRaises(ValueError):native_audit(a,p)
 
-    def _run(self, script, ideas, **kw):
-        prompts = {'work': [], 'spec': []}
+    def test_routing_only_never_calls_local_coding_worker(self):
+        from tools.ho02_projects import catalog
+        from tools.ho02_project_run import run_project
+        def factory(cfg):return FakeWorkers(cfg,{'triage':triage('bounded')})
+        with tempfile.TemporaryDirectory() as tmp:
+            r=run_project(catalog()[0],Path(tmp)/'trial','minimal',offline_handoff=True,routing_only=True,defer_grading=True,worker_factory=factory)
+            self.assertEqual(r['stages'][0]['status'],'ROUTED_LOCAL')
+            self.assertIsNone(r['stages'][0]['final']);self.assertFalse(r['stages'][0]['correct_delivery'])
 
-        def work(lane, cwd, prompt, extra):
-            prompts['work'].append(prompt)
-            return script.get('work', write_done)(lane, cwd, prompt, extra)
+    def test_restoring_original_is_not_a_new_protected_violation(self):
+        from tools.ho03_support import protected_hashes,preservation
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp);(p/'f').write_text('damaged');before=protected_hashes(p,['f']);(p/'f').write_text('original')
+            r=preservation(p,{'f':'original'},before)
+            self.assertTrue(r['protected_preserved']);self.assertEqual(r['protected_changed_this_stage'],[])
+            self.assertEqual(r['protected_files_changed'],['f'])
 
-        def judge(lane, cwd, prompt, extra):
-            prompts['spec'].append(prompt)
-            return Result(True, '', spec_verdict([]), [lane.model])
-        full = {'triage': triage('bounded'), 'work': work, 'spec': judge, **{k: v for k, v in script.items() if k != 'work'}}
-        self.env = Env(self.tmp, full, FakeCLM('bounded'), ideas=ideas, **kw)
-        tid = self.env.app.tasks.create(self.env.target, 'fix the bug')
-        self.env.run(60)
-        return self.env.db.task(tid), prompts
+    def test_failed_triage_stays_unresolved_instead_of_dispatching_a_peer(self):
+        from tools.ho02_project_run import run_project
+        from tools.ho02_projects import catalog
+        def factory(cfg):return FakeWorkers(cfg,{'triage':None})
+        # Both triages must fail: keep a live local SemIf service on the host from voting.
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp, patch('aa.semif.SemIf.available', return_value=False):
+            r=run_project(catalog()[0],Path(tmp)/'trial','minimal',worker_factory=factory)
+            self.assertEqual(r['stages'][0]['status'],'WAIT_OWNER')
+            self.assertIsNone(r['stages'][0]['task']['tier'])
+            self.assertFalse(r['stages'][0]['correct_delivery'])
 
-    def test_all_ideas_off_by_default(self):
-        t, p = self._run({}, {})
-        self.assertEqual(t['status'], 'DONE')
-        self.assertNotIn('Order of authority', p['work'][0])
-        self.assertNotIn('defect pattern', p['work'][0])
 
-    def test_authority_order_and_defect_twins_reach_the_worker(self):
-        t, p = self._run({}, {'authority_order': True, 'defect_twins': True})
-        self.assertIn('Order of authority', p['work'][0])
-        self.assertIn('same defect pattern', p['work'][0])
+class HO03FinalGuardTests(unittest.TestCase):
+    def test_report_keeps_missing_work_unknown_and_rejects_forged_completion(self):
+        from tools.ho03_round import plan,rows
+        from tools.ho03_projects import catalog
+        from tools.ho01_round import POLICIES
+        from tools.ho02_support import atomic,digest
+        p=plan('report-probe');t=p['trials'][0];project=next(x for x in catalog() if x['id']==t['project'])
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/t['id'];path.mkdir()
+            atomic(path/'manifest.json',dict(source_fingerprint=p['source_fingerprint'],project_hash=digest(project),policy=t['policy'],flags=POLICIES[t['policy']],mode=p['mode'],comparison_tier=p['comparison_tier'],offline_handoff=True,defer_grading=True,routing_only=False,timeout_s=t['timeout_s'],effective_config_sha256=p['effective_config_hashes'][t['policy']]))
+            g=dict(sha='observed',hidden_pass=True,all_tests_pass=True,protected_preserved=True,protected_changed_this_stage=[])
+            r=dict(project=t['project'],policy=t['policy'],stages=[dict(stage=1,status='DONE',first=None,final=g,correct_delivery=True,task={'tier':'medium_tough'})])
+            atomic(path/'result.json',r);(path/'events.jsonl').write_text('')
+            values=rows(p,root);self.assertEqual(values[0]['final_correct'],.5);self.assertIsNone(values[0]['first_correct']);self.assertFalse(values[1]['observed']);self.assertIsNone(values[1]['final_correct'])
+            r['stages'][0]['status']='AWAITING_PRO';atomic(path/'result.json',r)
+            with self.assertRaises(ValueError):rows(p,root)
 
-    def test_spec_conflicts_reach_the_judge(self):
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            return Result(True, '{}', {'status': 'done', 'summary': 's', 'open_items': [], 'question': '',
-                                       'rebuttals': [], 'spec_conflicts': ['test expects 400 but task says 422']},
-                          [lane.model])
-        t, p = self._run({'work': work}, {'authority_order': True})
-        self.assertIn('test expects 400 but task says 422', p['spec'][0])
-
-    def test_impact_map_is_shared_with_worker(self):
-        mapper = lambda lane, cwd, prompt, extra: Result(True, '', {'files': ['app.py: entry'], 'symbols': [],
-                                                                  'patterns': [], 'pitfalls': ['off by one']},
-                                                         [lane.model])
-        t, p = self._run({'map': mapper}, {'impact_map': True})
-        self.assertEqual(t['status'], 'DONE')
-        self.assertIn('off by one', p['work'][0])
-        self.assertIn(('luna_low', f'{t["id"]}-map'), self.env.workers.calls)
-
-    def test_diff_audit_flags_debug_prints_and_test_edits(self):
-        def work(lane, cwd, prompt, extra):
-            (cwd / 'done.txt').write_text('ok')
-            (cwd / 'app.py').write_text('print(1)\nprint("debug")\n')
-            (cwd / 'tests').mkdir(exist_ok=True)
-            (cwd / 'tests' / 'test_x.py').write_text('x')
-            return Result(True, 'done', None, [lane.model])
-        t, p = self._run({'work': work}, {'diff_audit': True})
-        audit = t['data']['audit']
-        self.assertTrue(any('debug statement added in app.py' in a for a in audit), audit)
-        self.assertIn('Deterministic diff audit findings', p['spec'][0])
-
-    def test_attacker_failing_test_is_evidence_for_judge(self):
-        attack = lambda lane, cwd, prompt, extra: Result(
-            True, 'FILE: tests/test_attack_x.py\n```\nimport sys\nsys.exit(1)\n```\nCOMMAND: python3 tests/test_attack_x.py\n',
-            None, [lane.model])
-        t, p = self._run({'attack': attack, 'local': True}, {'attacker': True}, local=True)
-        self.assertEqual(len(t['data']['attack']), 1)
-        self.assertIn('adversarial test written by an independent model FAILS', p['spec'][0])
-        self.assertFalse((self.env.cfg.worktrees / t['id'] / 'tests' / 'test_attack_x.py').exists())
+    def test_extension_and_upper_diagnostic_require_their_explicit_calibration_link(self):
+        from tools.ho03_round import plan,execute
+        from tools.ho02_support import atomic
+        from unittest.mock import patch
+        for phase in ('extension','upper-diagnostic'):
+            p=plan('missing-cal-'+phase,phase)
+            with tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp);audit=root/'audit.json';versions={'codex':'c','claude':'a','node':'n'}
+                atomic(audit,dict(source_fingerprint=p['source_fingerprint'],reviewer='operator',evidence=['fixture'],memory_injection_absent=True,subscription_auth_unchanged=True,node_available=True,cgroup_limits_verified=True,cli_versions=versions))
+                with patch('tools.ho03_round.read_native_versions',return_value=versions),patch('tools.ho03_round.subprocess.Popen') as spawn:
+                    with self.assertRaises(ValueError):execute(p,root/'runs',audit)
+                    spawn.assert_not_called()

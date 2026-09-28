@@ -60,6 +60,13 @@ class QualityMixin:
         tri = t['data'].get('triage') or {}
         race = (self.cfg['best_of_2'].get('enabled', True) and
                 t['tier'] in self.cfg['best_of_2'].get('tiers', ['medium_tough']))
+        if self.cfg['harness_opt'].get('gate_shadow', False) and 'gate_snapshot' not in t['data']:
+            from .gate_snapshot import snapshot
+            record = snapshot(t['prompt'], t['tier'], tri, t['data'].get('checks') or {},
+                              self.cfg['oracle_tests'].get('enabled', True), race,
+                              self.cfg['spec_check'].get('enabled', True))
+            t['data']['gate_snapshot'] = record
+            self.db.event('gate_snapshot', t['id'], **record)
         t['data']['mode'] = 'race' if race else 'single'
         t['data']['planned_lane'] = lane
         oc = self.cfg['oracle_tests']
@@ -408,8 +415,10 @@ class QualityMixin:
 
         def run(lane):
             try:
+                hook = ({'stop_checks': t['data'].get('checks') or {}}
+                        if self.cfg['harness_opt'].get('claude_stop_checks', False) else {})
                 return lane, self.workers.execute(LANES[lane], prompt_for(cands[lane]), cands[lane],
-                                                  schema=WORKER_SCHEMA, log_name=f'{t["id"]}-race-{lane}')
+                                                  schema=WORKER_SCHEMA, log_name=f'{t["id"]}-race-{lane}', **hook)
             except BillingError as exc:
                 return lane, exc
         if t['data'].get('race_results_saved') and all(w.exists() for w in cands.values()):
@@ -486,7 +495,12 @@ class QualityMixin:
         order = lanes[:]
         random.Random(t['id']).shuffle(order)                   # position-bias control, reproducible
         start = self._start_commit(t)
-        diff = lambda l: git.git(cands[l], 'diff', f'{start}..HEAD', check=False)[:30000]
+        def diff(l):
+            text = git.git(cands[l], 'diff', f'{start}..HEAD', check=False)
+            if self.cfg['harness_opt'].get('balanced_diffs', False):
+                from .context import balanced_diff
+                return balanced_diff(text, 30000)
+            return text[:30000]
         from .tasks import bullet, render
         prompt = render('pick.md', prompt=t['prompt'],
                         acceptance=bullet((t['data'].get('triage') or {}).get('acceptance_criteria')),

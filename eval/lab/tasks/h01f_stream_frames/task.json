@@ -1,0 +1,6 @@
+{
+ "id": "h01f_stream_frames",
+ "tier_hint": "medium_tough",
+ "prompt": "Implement Decoder.feed(data) for a byte stream of frames: each has a four-byte unsigned big-endian payload length then that many bytes. One feed may finish zero, one or many frames; return payloads in arrival order and retain incomplete bytes across calls. Zero-length payloads are valid. Maximum payload length is 1024; an oversized header raises ValueError immediately, discards buffered bytes and enters a failed state. All later feed calls raise ValueError until reset() clears both failed state and buffer. Return bytes payloads. Do not reinterpret payload contents as headers.",
+ "trap": "none"
+}

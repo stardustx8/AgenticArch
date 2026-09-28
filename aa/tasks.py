@@ -325,7 +325,9 @@ class TaskFlow(QualityMixin):
                                       '- (none configured)'),
                         previous=previous, owner_answers=owner_answers, ideas=self._idea_notes(t))
         try:
-            res = self.workers.execute(lane, prompt, wt, schema=WORKER_SCHEMA, log_name=t['id'])
+            hook = ({'stop_checks': t['data'].get('checks') or {}}
+                    if self.cfg['harness_opt'].get('claude_stop_checks', False) else {})
+            res = self.workers.execute(lane, prompt, wt, schema=WORKER_SCHEMA, log_name=t['id'], **hook)
         except BillingError as exc:
             self.db.update_task(t['id'], status='BLOCKED', result=f'billing: {exc}')
             self.n.send(f'Blocked {t["id"]}', f'Subscription check failed: {exc}', tags='warning')
@@ -417,7 +419,9 @@ class TaskFlow(QualityMixin):
 
     def _verify(self, t: dict) -> None:
         wt = Path(t['worktree'])
-        results = checks_mod.run(t['data'].get('checks') or {}, wt)
+        focused = self.cfg['harness_opt'].get('focused_failures', False)
+        opts = {'focused': True} if focused else {}
+        results = checks_mod.run(t['data'].get('checks') or {}, wt, **opts)
         git.discard(wt)                      # drop artefacts produced by the checks
         t['data']['checks_result'] = checks_mod.summary(results)
         failed = [r for r in results if not r.ok]
@@ -445,7 +449,7 @@ class TaskFlow(QualityMixin):
             else:
                 self.db.update_task(t['id'], status='DELIVER', data=t['data'])
         else:
-            t['data']['last_failure'] = checks_mod.failure_report(failed)
+            t['data']['last_failure'] = checks_mod.failure_report(failed, focused=focused)
             self.db.update_task(t['id'], data=t['data'])
             self._retry_or_escalate(t)
 
@@ -551,7 +555,10 @@ class TaskFlow(QualityMixin):
         criteria = ((t['data'].get('triage') or {}).get('acceptance_criteria') or
                     ['The task is fully implemented exactly as stated above.'])
         diff = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', check=False)
-        if len(diff) > 60000:
+        if self.cfg['harness_opt'].get('balanced_diffs', False):
+            from .context import balanced_diff
+            diff = balanced_diff(diff, 60000)
+        elif len(diff) > 60000:
             diff = diff[:60000] + '\n[diff truncated; read the files in the worktree]'
         rebuttals = t['data'].get('rebuttals') or []
         pre = [k for k, v in (t['data'].get('triage_notes') or {}).items() if v == 'PRE_EXISTING']

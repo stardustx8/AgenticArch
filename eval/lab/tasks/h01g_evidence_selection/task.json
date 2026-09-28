@@ -1,0 +1,6 @@
+{
+ "id": "h01g_evidence_selection",
+ "tier_hint": "medium_tough",
+ "prompt": "The export is using stale product facts. Implement report(records) from the current contract in docs/current.md, not archived notes. Keep its Python function API. Source attribution and deterministic handling of conflicts are required. Do not alter input records.",
+ "trap": "stale_context"
+}

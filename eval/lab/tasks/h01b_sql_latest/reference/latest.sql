@@ -1,0 +1,1 @@
+SELECT customer_id,event_id,amount FROM (SELECT *,ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY happened_at DESC,event_id DESC) AS rank FROM events WHERE status='completed') WHERE rank=1 ORDER BY customer_id;

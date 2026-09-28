@@ -43,7 +43,7 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
      backstop: every model call is logged (event model_call); a task at retry.max_model_calls (40;
        normal lab tasks use <= 13) is BLOCKED + ntfy; `retry` gives it a fresh budget
   -> pass: mutation gate (planted bugs in changed code must be caught by the oracle tests)
-  -> spec check — Opus 5.5 medium judges every acceptance criterion (+ test tampering)
+  -> spec check: Opus 5.5 medium judges every acceptance criterion (+ test tampering)
      against the diff, read-only in the worktree
        unmet -> back to the same worker with the reasons; worker fixes or answers REBUTTAL:
        after 3 loops -> ntfy: Accept / One more / Cancel
@@ -128,3 +128,126 @@ Units start with the login session. For start at boot without login run once:
 - Decide the triage policy (Codex alone vs Codex + SemIf; eval/RESULTS.md).
 - Re-run the benchmark on the owner's real tasks once enough are logged.
 - Mac: skills call `aa` via Tailscale SSH; the target repo must exist on the workstation.
+
+
+## HO-01 experimental verification and context (defaults unchanged)
+
+The `harness_opt` section is opt-in. Roll back by removing its overrides; the
+existing coordinator verification, frozen test floors, owner gates, subscription
+billing preflight and lane choices are unchanged.
+
+```toml
+[harness_opt]
+balanced_diffs = false
+focused_failures = false
+gate_shadow = false
+claude_stop_checks = false
+stop_max_blocks = 2
+stop_timeout_s = 60
+```
+
+`balanced_diffs` distributes the existing 30,000-character pairwise and
+60,000-character spec-review budgets across changed files instead of taking only
+the first files. Excerpts explicitly mark omissions and are not executable
+patches. Small diffs are byte-for-byte unchanged. It does not increase a judge's
+budget or let the judge approve a check failure.
+
+`focused_failures` keeps bounded diagnostic windows and both ends of failed
+check output. The original exit code still controls failure. This affects the
+coordinator's retained check output and retry report; it cannot prune tools inside
+a provider-owned worker session. Excerpts are untrusted diagnostic data, not new
+instructions.
+
+`gate_shadow` stores a schema-versioned, pre-quality-dispatch feature snapshot in
+task data. Its explicit allowlist excludes results, hidden tests and delivered
+diffs. It **abstains** and never switches a gate. `aa.gate_snapshot.replay_choice`
+replays menu validation, including pinned/running selections and separately
+labelled fallbacks; it deliberately returns no counterfactual coding outcome.
+
+`claude_stop_checks` installs a deterministic command Stop hook only on Claude
+implementation sessions with configured checks. Each dispatch gets a frozen,
+checksummed policy and a bounded counter outside the worktree. It merges with
+existing permission/sandbox settings. The hook can request at most two additional
+repair turns by default, subject to a 60-second check-batch deadline. It ignores
+foreign working directories and non-Stop events. Timeout or malformed input ends
+the hook loop; **the coordinator still runs its independent verification and
+retains all existing failure handling**. It never commits, publishes or approves
+completion. Hook events remain under the task state directory's `stop-hooks/`.
+
+This Linux/POSIX hook is a latency experiment, not an OS security boundary.
+Commands run repository code under the same user; a hostile process with that
+user's privileges is outside its threat model. Live CLI hook loading, existing
+user hooks, nested subprocess cleanup, wrong oracle tests, and subscription usage
+must be checked on the owner's workstation before promotion. Do not infer context
+compaction or actual subscription quota from cumulative token counts.
+
+The retrieval benchmark now uses one seeded random stream per task. Earlier
+`random` rows were constant-score ties, not random retrieval, and must not be used
+as a baseline. Commit-message retrieval measures localization, not end-to-end task
+success; its shuffled single-repository split is not an independent deployment
+holdout.
+
+### HO-01 repeatable lab rounds and evidence receipts
+
+See `eval/lab/HO01.md`. The experimental repeat runner is separate from the daemon:
+planning never starts a model, and explicit execution preserves every paired trial.
+`tools/lab.py --record-v2` captures source/config/task hashes, observed model names,
+failed-call/usage records, decider rows and Stop events. These are receipts, not
+new decision authority. Catastrophic-error usage can remain unknown; outer elapsed
+time and the unknown marker must be retained in analyses. Defaults without this
+lab flag retain the original behavior. New HO-01 runtime flags remain off.
+
+Current official Codex documentation also describes blocking Stop hooks and a
+trust-review mechanism for unmanaged hook definitions. This patch wires only the
+Claude session-scoped adapter. Verify the installed custom Codex version and trust
+contract before a separately flagged Codex adapter; do not assume it is limited
+to notifications or silently copy Claude configuration into it. Documentation:
+https://developers.openai.com/codex/hooks (checked 2026-09-26).
+
+## HO-02 project evaluation and repaired experiments
+
+See [HO02.md](HO02.md) for the opt-in project lab and its limitations. Nothing in
+this section changes production gate defaults or the deep-flow model policy.
+The earlier installation statements are historical operational notes, not a
+claim that the HO-02 branch has been installed on the owner's machine.
+
+The focused-failure experiment now preserves the old suffix when all diagnostics
+fit there. Otherwise it retains all fitting diagnostic anchors and spends the
+remaining budget on adjacent context. It no longer samples only twelve anchors.
+This repairs an evidence-loss defect; it does not establish a coding-quality gain.
+
+The Stop adapter now accepts real subdirectories of the frozen worktree, rejects
+symlink escapes, verifies copied executable bytes from the pinned launcher, and
+uses absolute `Edit(//path/**)` rules for its capsule and project `.claude` files.
+Current Claude rules cover Write through Edit; `Write(path)` patterns are ignored.
+CLI settings request hooks enabled, without overriding managed policy. These are
+file-tool protections, not a same-user shell sandbox. Check artifacts, shell-level
+mutation, managed/user-hook interactions and structured-output compatibility
+remain rollout gates. Keep this experiment off outside an explicitly bounded pilot.
+
+The project lab supplies six synthetic existing micro-projects with two stages
+each. It executes Python, SQLite, Bash and JavaScript locally and TypeScript via
+Node type stripping, not static type checking. Only `repo/` and the current stage
+prompt reach workers. Hidden grading happens afterwards in separate worktrees;
+its output is never retry feedback. Public reference readability is still an
+unresolved contamination risk, not a proven access-control boundary.
+
+`tools/ho02_round.py plan` makes a pinned, randomized paired plan. `execute` runs
+sequentially with an outer deadline and explicit `--resume`. It keeps interruption
+records and refuses changed source or policy. Use a private output directory
+outside this public checkout and a host memory limit. The standalone `trial`
+command has step-boundary timeout checks; use `execute` for the outer process limit.
+
+Each second stage starts from the actual first-stage delivery, not a reference.
+The first score is the first submitted VERIFY snapshot, not a partial response;
+final correctness also requires coordinator completion, combined tests and
+protected originals. Simulated restart and transport events are labelled as such.
+Unfinished calls, missing trials and absent reviews remain unknown. Seven separate
+0..4 rubric dimensions and four critical-failure categories are supported by
+`tools/ho02_report.py`; review files must identify a reviewer and exact snapshot.
+The validator checks structure, not the reviewer's independence or honesty.
+No automatic promotion follows from this small synthetic suite.
+
+## HO-03 recovery-314 experiment integration
+
+See [HO03.md](HO03.md) for the exact recovery-314 interface. Its native memory flag is `harness_opt.codex_no_memories` (default false), its primary mode is bounded with a fixed medium-tough Astra baseline, and its separate routing phase makes local awaiting-response handoffs. Persistent clocks, stage-local preservation attribution and deferred hidden grading support the opt-in lab. A source/configuration-bound calibration pauses at 2, 6 and 12 trajectories. Neither a failed calibration nor a locally complete handoff approves production changes. Native compatibility, privacy audits and whole-cgroup resource bounds remain mandatory. A separately recorded 319-test continuation uses a different interface; do not mix its commands or flags with these files.

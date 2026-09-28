@@ -1,0 +1,1 @@
+exports.rank = items => items.map((item,index)=>({item,index,key: typeof item.priority === 'number' && Number.isFinite(item.priority) ? item.priority : Infinity})).sort((a,b)=>(a.key===b.key ? a.index-b.index : a.key<b.key ? -1:1)).map(x=>x.item);

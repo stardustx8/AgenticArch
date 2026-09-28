@@ -38,21 +38,41 @@ def sh(cwd, *args):
 class CallLog:
     """Wraps Workers.execute to record every model call (lane, seconds, usage)."""
 
-    def __init__(self, workers):
+    def __init__(self, workers, record_v2=False):
         self.w, self.calls, self.lock = workers, [], threading.Lock()
         orig = workers.execute
 
         def execute(lane, prompt, cwd, **kw):
             t0 = time.time()
-            res = orig(lane, prompt, cwd, **kw)
+            try:
+                res = orig(lane, prompt, cwd, **kw)
+            except Exception as exc:
+                if record_v2:
+                    with self.lock:
+                        self.calls.append({'lane': lane.name, 'kind': kw.get('log_name', '').split('-', 2)[-1],
+                                           'seconds': round(time.time()-t0, 1), 'ok': False,
+                                           'usage': None, 'error_type': type(exc).__name__})
+                raise
             with self.lock:
                 self.calls.append({'lane': lane.name, 'kind': kw.get('log_name', '').split('-', 2)[-1],
-                                   'seconds': round(time.time() - t0, 1), 'ok': res.ok, 'usage': res.usage})
+                                   'seconds': round(time.time() - t0, 1), 'ok': res.ok, 'usage': res.usage,
+                                   **({'model_seen': res.model_seen} if record_v2 else {})})
             return res
         workers.execute = execute
 
 
-def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int) -> dict:
+def grade(check: Path, pattern: str, timeout: int = 300) -> tuple[bool, str]:
+    """Run test files matching pattern; a hang is a failed grade, not a crashed trial."""
+    try:
+        p = subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.', '-p', pattern],
+                           cwd=check, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout.decode(errors='replace') if isinstance(exc.stdout, bytes) else (exc.stdout or '')
+        return False, out + f'\n[lab] grading timed out after {timeout} s; counted as failed\n'
+    return p.returncode == 0, p.stdout + p.stderr
+
+
+def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int, *, record_v2: bool = False) -> dict:
     from aa import config
     from aa.daemon import App
     from aa.db import DB
@@ -75,74 +95,91 @@ def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int) -> dict:
         app = App(cfg, db)
         pings = []
         app.n.send = lambda title, msg, **kw: pings.append(title) if kw.get('choices') or 'Question' in title else None
-        log = CallLog(app.workers)
-        tid = app.tasks.create(repo, meta['prompt'])
-        t0 = time.time()
-        owner_answers = 0
-        answered = None
-        while time.time() - t0 < timeout_s:
-            app.tick()
+        log = CallLog(app.workers, record_v2=record_v2)
+        art = RESULTS / 'runs' / variant / meta['id']
+        metadata = None
+        if record_v2:
+            from tools.ho01_records import receipt, save_records
+            if art.exists():
+                db.conn.close()
+                raise FileExistsError('refusing to overwrite recorded trial: ' + str(art))
+            art.mkdir(parents=True)
+            metadata = receipt(ROOT, task_dir, flags, cfg.data)
+        try:
+            tid = app.tasks.create(repo, meta['prompt'])
+            t0 = time.time()
+            owner_answers = 0
+            answered = None
+            while time.time() - t0 < timeout_s:
+                app.tick()
+                t = db.task(tid)
+                if t['status'] in TERMINAL:
+                    break
+                if t['status'] == 'WAIT_OWNER' and answered != t['updated']:   # simulated owner, once per wait
+                    answered = t['updated']
+                    owner_answers += 1
+                    d = t['data']
+                    if d.get('worker_question'):
+                        db.inbox_put(f'answer {tid} {AUTO_ANSWER}')
+                    elif d.get('spec_wait'):
+                        db.inbox_put(f'accept {tid}')
+                    elif d.get('env_wait'):
+                        db.inbox_put(f'code {tid}')
+                    elif (d.get('tier_votes') or {}).get('codex'):
+                        db.inbox_put(f'tier {tid} {d["tier_votes"]["codex"]}')
+                    else:
+                        db.inbox_put(f'checks {tid} ok')
+                time.sleep(1)
             t = db.task(tid)
-            if t['status'] in TERMINAL:
-                break
-            if t['status'] == 'WAIT_OWNER' and answered != t['updated']:   # simulated owner, once per wait
-                answered = t['updated']
-                owner_answers += 1
-                d = t['data']
-                if d.get('worker_question'):
-                    db.inbox_put(f'answer {tid} {AUTO_ANSWER}')
-                elif d.get('spec_wait'):
-                    db.inbox_put(f'accept {tid}')
-                elif d.get('env_wait'):
-                    db.inbox_put(f'code {tid}')
-                elif (d.get('tier_votes') or {}).get('codex'):
-                    db.inbox_put(f'tier {tid} {d["tier_votes"]["codex"]}')
+            hidden = hidden_all = None
+            art = RESULTS / 'runs' / variant / meta['id']            # evidence kept for failure analysis
+            if not record_v2:
+                shutil.rmtree(art, ignore_errors=True)
+            art.mkdir(parents=True, exist_ok=True)
+            (art / 'task.json').write_text(json.dumps({k: v for k, v in t.items() if k != 'data'}, indent=1, default=str))
+            (art / 'data.json').write_text(json.dumps(t['data'], indent=1, default=str))
+            (art / 'events.txt').write_text('\n'.join(f'{e["kind"]} {e["detail"]}' for e in
+                                                      db.q('SELECT kind, detail FROM events ORDER BY id')))
+            wt_oracle = tmp / 'state' / 'worktrees' / f'{tid}-oracle'
+            if wt_oracle.exists():
+                for f in (t['data'].get('oracle') or {}).get('files', []):
+                    if (wt_oracle / f).exists():
+                        (art / f'oracle__{Path(f).name}').write_text((wt_oracle / f).read_text())
+            if t['status'] == 'DONE':
+                check = tmp / 'check'
+                sh(repo, 'git', 'worktree', 'add', '-q', str(check), t['branch'] or f'aa/{tid}')
+                shutil.copytree(task_dir / 'hidden', check, dirs_exist_ok=True)
+                hidden, h_out = grade(check, 'test_hidden_*.py')
+                hidden_all, _ = grade(check, 'test*.py')
+                (art / 'hidden_output.txt').write_text(h_out)
+                (art / 'delivered.diff').write_text(sh(repo, 'git', 'diff', 'main', t['branch'] or f'aa/{tid}'))
+            d = t['data']
+            usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}
+            for c in log.calls:
+                u = c['usage'] or {}
+                if c['lane'].startswith(('luna', 'astra')):
+                    usage['codex_tokens'] += (u.get('input_tokens', 0) or 0) + (u.get('output_tokens', 0) or 0)
+                    usage['codex_cached'] += u.get('cached_input_tokens', 0) or 0
+                elif c['lane'].startswith('opus'):
+                    usage['claude_usd_equiv'] += u.get('api_equivalent_usd') or 0
                 else:
-                    db.inbox_put(f'checks {tid} ok')
-            time.sleep(1)
-        t = db.task(tid)
-        hidden = hidden_all = None
-        art = RESULTS / 'runs' / variant / meta['id']            # evidence kept for failure analysis
-        shutil.rmtree(art, ignore_errors=True)
-        art.mkdir(parents=True, exist_ok=True)
-        (art / 'task.json').write_text(json.dumps({k: v for k, v in t.items() if k != 'data'}, indent=1, default=str))
-        (art / 'data.json').write_text(json.dumps(t['data'], indent=1, default=str))
-        (art / 'events.txt').write_text('\n'.join(f'{e["kind"]} {e["detail"]}' for e in
-                                                  db.q('SELECT kind, detail FROM events ORDER BY id')))
-        wt_oracle = tmp / 'state' / 'worktrees' / f'{tid}-oracle'
-        if wt_oracle.exists():
-            for f in (t['data'].get('oracle') or {}).get('files', []):
-                if (wt_oracle / f).exists():
-                    (art / f'oracle__{Path(f).name}').write_text((wt_oracle / f).read_text())
-        if t['status'] == 'DONE':
-            check = tmp / 'check'
-            sh(repo, 'git', 'worktree', 'add', '-q', str(check), t['branch'] or f'aa/{tid}')
-            shutil.copytree(task_dir / 'hidden', check, dirs_exist_ok=True)
-            run = lambda pat: subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'tests', '-t', '.',
-                                              '-p', pat], cwd=check, capture_output=True, text=True, timeout=300)
-            h = run('test_hidden_*.py')
-            hidden = h.returncode == 0
-            hidden_all = run('test*.py').returncode == 0
-            (art / 'hidden_output.txt').write_text(h.stdout + h.stderr)
-            (art / 'delivered.diff').write_text(sh(repo, 'git', 'diff', 'main', t['branch'] or f'aa/{tid}'))
-        d = t['data']
-        usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}
-        for c in log.calls:
-            u = c['usage'] or {}
-            if c['lane'].startswith(('luna', 'astra')):
-                usage['codex_tokens'] += (u.get('input_tokens', 0) or 0) + (u.get('output_tokens', 0) or 0)
-                usage['codex_cached'] += u.get('cached_input_tokens', 0) or 0
-            elif c['lane'].startswith('opus'):
-                usage['claude_usd_equiv'] += u.get('api_equivalent_usd') or 0
-            else:
-                usage['local_tokens'] += u.get('total_tokens', 0) or 0
-        return {'variant': variant, 'task': meta['id'], 'tier_hint': meta['tier_hint'], 'status': t['status'],
-                'tier': t['tier'], 'lane': t['lane'], 'hidden_pass': hidden, 'all_tests_pass': hidden_all,
-                'seconds': round(time.time() - t0), 'pings': owner_answers, 'passes': t['passes'],
-                'spec_loops': d.get('spec_loops', 0), 'oracle': bool(d.get('oracle')),
-                'race': bool(d.get('race')), 'mutation': (d.get('mutation') or {}).get('score'),
-                'calls': len(log.calls), 'calls_by_lane': _count(c['lane'] for c in log.calls), **usage,
-                'flags': flags, 'ts': time.strftime('%Y-%m-%d %H:%M')}
+                    usage['local_tokens'] += u.get('total_tokens', 0) or 0
+            return {'variant': variant, 'task': meta['id'], 'tier_hint': meta['tier_hint'], 'status': t['status'],
+                    'tier': t['tier'], 'lane': t['lane'], 'hidden_pass': hidden, 'all_tests_pass': hidden_all,
+                    'seconds': round(time.time() - t0), 'pings': owner_answers, 'passes': t['passes'],
+                    'spec_loops': d.get('spec_loops', 0), 'oracle': bool(d.get('oracle')),
+                    'race': bool(d.get('race')), 'mutation': (d.get('mutation') or {}).get('score'),
+                    'calls': len(log.calls), 'calls_by_lane': _count(c['lane'] for c in log.calls), **usage,
+                    'flags': flags, 'ts': time.strftime('%Y-%m-%d %H:%M'),
+                    **({'receipt': metadata, 'usage_missing_calls': sum(not c.get('usage') for c in log.calls),
+                        'failed_worker_calls': sum(not c['ok'] for c in log.calls)} if record_v2 else {})}
+
+        finally:
+            try:
+                if record_v2:
+                    save_records(art, db, log.calls, tmp / 'state', metadata)
+            finally:
+                db.conn.close()
 
 
 def _count(items) -> dict:
@@ -191,6 +228,7 @@ def main() -> int:
     ap.add_argument('--parallel', type=int, default=3)
     ap.add_argument('--timeout', type=int, default=2700)
     ap.add_argument('--report', action='store_true')
+    ap.add_argument('--record-v2', action='store_true', help='persist receipts, per-call usage, decisions and Stop events')
     ap.add_argument('--ref', default='baseline', help='variant the report compares against')
     a = ap.parse_args()
     if a.report:
@@ -204,11 +242,14 @@ def main() -> int:
     lock = threading.Lock()
 
     def one(d):
+        started = time.monotonic()
         try:
-            r = run_task(d, a.variant, flags, a.timeout)
+            r = run_task(d, a.variant, flags, a.timeout, record_v2=a.record_v2)
         except Exception as exc:                            # a crashed run is a result, not a stop
             r = {'variant': a.variant, 'task': d.name, 'status': 'ERROR', 'error': repr(exc)[:500],
                  'hidden_pass': False, 'seconds': 0, 'pings': 0, 'codex_tokens': 0, 'claude_usd_equiv': 0}
+            if a.record_v2:
+                r.update(seconds=round(time.monotonic()-started, 3), resource_measurements_unknown=True)
         with lock:
             with open(out, 'a') as fh:
                 fh.write(json.dumps(r) + '\n')

@@ -1,0 +1,6 @@
+{
+ "id": "h01a_unicode_keys",
+ "tier_hint": "bounded",
+ "prompt": "Implement canonical_key(text) for Unicode identifiers: normalize to NFC, casefold, normalize to NFC again, then split on all Unicode whitespace and join the words with a single ASCII space. Empty or whitespace-only inputs return an empty string. Do not remove accents or punctuation. Keep the input API.",
+ "trap": "none"
+}

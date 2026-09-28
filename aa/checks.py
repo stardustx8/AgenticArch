@@ -72,14 +72,20 @@ class CheckRun:
         return self.exit_code == 0
 
 
-def run(checks: dict[str, str], cwd: Path, timeout: int = 1800) -> list[CheckRun]:
+def run(checks: dict[str, str], cwd: Path, timeout: int = 1800, *,
+        focused: bool = False) -> list[CheckRun]:
     results = []
     for name, cmd in checks.items():
         try:
             p = subprocess.run(cmd, shell=True, cwd=str(cwd), capture_output=True, text=True,
                                timeout=timeout, stdin=subprocess.DEVNULL,
                                env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
-            out = (p.stdout + p.stderr)[-6000:]
+            text = p.stdout + p.stderr
+            if focused:
+                from .context import focused_failure
+                out = focused_failure(text, 6000)
+            else:
+                out = text[-6000:]
             results.append(CheckRun(name, cmd, p.returncode, out))
         except subprocess.TimeoutExpired:
             results.append(CheckRun(name, cmd, 124, f'timeout after {timeout}s'))
@@ -91,6 +97,8 @@ def summary(results: list[CheckRun]) -> str:
                      for r in results) or '- (no checks)'
 
 
-def failure_report(results: list[CheckRun]) -> str:
-    return '\n\n'.join(f'### {r.name}: `{r.command}` exit {r.exit_code}\n```\n{r.output[-3000:]}\n```'
+def failure_report(results: list[CheckRun], *, focused: bool = False) -> str:
+    from .context import focused_failure
+    excerpt = lambda text: focused_failure(text, 3000) if focused else text[-3000:]
+    return '\n\n'.join(f'### {r.name}: `{r.command}` exit {r.exit_code}\n```\n{excerpt(r.output)}\n```'
                        for r in results if not r.ok)

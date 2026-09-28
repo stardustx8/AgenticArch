@@ -1,9 +1,10 @@
 """Context selection benchmark: which files does a change need, given its description?
 
-Ground truth: past commits of pallets/click. Query = commit message (file names masked),
+Ground truth: past commits of pallets/click. Query = post-outcome commit message (file names masked),
 relevant = the .py/.rst/.md files the commit modified that existed at its parent.
 Candidates = all such files at the parent commit. Methods rank candidates; metrics are
-recall@5, recall@10 and MRR of the first relevant file. Dev/test split by commit order.
+recall@5, recall@10 and MRR of the first relevant file. Alternating dev/test after
+seeded shuffling is NOT a temporal or repository-disjoint holdout.
 """
 import json
 import math
@@ -18,9 +19,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 EXT = re.compile(r'\.(py|rst|md)$')
 # usage: python3 tools/bench_context.py <clone of github.com/pallets/click> [n_commits] [out.json]
-REPO = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('ctx-click')
-N = int(sys.argv[2]) if len(sys.argv) > 2 else 100
-OUT = Path(sys.argv[3]) if len(sys.argv) > 3 else Path('ctx_bench.json')
+REPO, N, OUT = Path('ctx-click'), 100, Path('ctx_bench.json')
+
+def random_scores(candidates, seed):
+    rng = random.Random(seed)
+    return {name: rng.random() for name in candidates}
 
 
 def git(*a):
@@ -82,6 +85,10 @@ def metrics(ranked, gold):
 
 
 def main():
+    global REPO, N, OUT
+    REPO = Path(sys.argv[1]) if len(sys.argv) > 1 else REPO
+    N = int(sys.argv[2]) if len(sys.argv) > 2 else N
+    OUT = Path(sys.argv[3]) if len(sys.argv) > 3 else OUT
     from aa import config
     from aa.db import DB
     from aa.semif import SemIf
@@ -102,7 +109,7 @@ def main():
         content = {f: git('show', f'{parent}:{f}') for f in cands}
         head = {f: '\n'.join(v.splitlines()[:40]) for f, v in content.items()}
         sc = {}
-        sc['random'] = {f: random.Random(i).random() for f in cands}
+        sc['random'] = random_scores(cands, i)
         sc['keyword_path'] = {f: sum(w in f.lower() for w in tokens(query)) for f in cands}
         sc['bm25_content'] = bm25(query, content)
         sc['semif_path'] = {f: s._probs(f'Change: {query}\n\nFile: {f}', q, opts)['yes'] for f in cands}

@@ -1,0 +1,1 @@
+Read only README.md in the supplied working directory and return its fixture marker. Do not edit files, inspect personal directories, or use knowledge outside this fixture. This is a read-only worker-isolation probe, not an implementation task.

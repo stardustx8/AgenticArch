@@ -1,0 +1,2 @@
+# Current approved contract
+Only status=approved records are eligible. For each product use the highest integer revision among eligible records. Ties with identical values choose the lexicographically smallest id. Ties at the highest revision with different values raise ValueError, rather than guessing. Products without eligible records are omitted. Return a list of dictionaries containing exactly product,value,source (source is the selected id), ordered by product. No other record fields may be disclosed.
