@@ -20,6 +20,7 @@ Workers are the owner's subscription CLIs: `~/.local/bin/codex` (ChatGPT login) 
 
 ```text
 Default since D024: the simple pipeline. Stages marked [opt-in] are off unless enabled in aa.toml.
+[experimental, D025] local_first: configured tiers start on local Gemma via Codex; independent review, then accept or escalate.
 aa task "..."  (or the agenticarch skill in Codex desktop)
   -> triage: Codex gpt-6-luna high (read-only, JSON) + SemIf tier vote
        agree / one abstains -> tier;  disagree -> ntfy asks owner (buttons)

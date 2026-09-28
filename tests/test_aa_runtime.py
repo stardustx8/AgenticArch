@@ -1849,3 +1849,144 @@ class SimpleDefaultTests(unittest.TestCase):
                 self.assertEqual(calls, ['luna_high'])
             finally:
                 env.close()
+
+
+class LocalFirstTests(unittest.TestCase):
+    """Round B (2026-09-28): local Gemma via Codex first; an independent review accepts or escalates."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.lanes, self.judges, self.work_prompts = [], [], []
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def make(self, work, verdict=lambda n: spec_verdict([])):
+        def worker(lane, cwd, prompt, extra):
+            self.lanes.append(lane.name); self.work_prompts.append(prompt)
+            return work(lane, cwd, prompt, extra)
+        def spec(lane, cwd, prompt, extra):
+            self.judges.append(lane.name)
+            return Result(True, '', verdict(len(self.judges)), [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': worker, 'spec': spec},
+                       FakeCLM('bounded'), triage=False, spec=False)
+        self.env.cfg.data['local_first']['enabled'] = True
+        return self.env.app.tasks.create(self.env.target, 'feature')
+
+    def test_off_by_default(self):
+        self.assertFalse(config.load(Path('/nonexistent'))['local_first']['enabled'])
+
+    def test_review_accepts_local_work(self):
+        tid = self.make(write_done)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(self.lanes, ['gemma_codex'])
+        self.assertEqual(self.judges, ['luna_high'])          # reviewed although spec_check is off
+        self.assertTrue(t['data']['local_first']['accepted'])
+
+    def test_review_findings_escalate_to_the_tier_lane(self):
+        tid = self.make(write_done, verdict=lambda n: spec_verdict(['rows keep restated']))
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(self.lanes, ['gemma_codex', 'luna_high'])
+        self.assertEqual(self.judges, ['luna_high'])          # the paid lane follows the simple pipeline
+        self.assertIn('independent review found', self.work_prompts[1])
+        self.assertIn('rows keep restated', self.work_prompts[1])
+        self.assertEqual(t['data']['local_first']['escalated'], 'review')
+
+    def test_failing_checks_escalate_after_the_lane_budget(self):
+        def work(lane, cwd, prompt, extra):
+            if lane.name == 'gemma_codex':
+                (cwd / 'wrong.txt').write_text(str(len(self.lanes)))     # a real (wrong) change each time
+                return Result(True, 'tried', None, [lane.model])
+            return write_done(lane, cwd, prompt, extra)
+        tid = self.make(work)
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertEqual(self.lanes, ['gemma_codex', 'gemma_codex', 'luna_high'])
+        self.assertEqual(self.judges, [])
+
+    def test_empty_turn_gets_one_free_nudge(self):
+        def work(lane, cwd, prompt, extra):
+            if len(self.lanes) == 1:
+                return Result(True, "I'll start by exploring the code.", None, [lane.model])
+            return write_done(lane, cwd, prompt, extra)
+        tid = self.make(work)
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(self.lanes, ['gemma_codex', 'gemma_codex'])
+        self.assertIn('ended without changing any file', self.work_prompts[1])
+        self.assertEqual(t['passes'], 1)                     # the nudge is free
+
+    def test_plain_text_early_stop_is_nudged_even_though_the_schema_failed(self):
+        def work(lane, cwd, prompt, extra):
+            if len(self.lanes) == 1:     # what _codex returns for a one-sentence plain-text turn
+                return Result(False, "I'll start by exploring the code.", None, [], error='no JSON')
+            return write_done(lane, cwd, prompt, extra)
+        tid = self.make(work)
+        self.env.run()
+        self.assertEqual(self.lanes, ['gemma_codex', 'gemma_codex'])
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+
+    def test_second_empty_turn_is_a_normal_failed_pass(self):
+        def work(lane, cwd, prompt, extra):
+            if lane.name == 'gemma_codex':
+                return Result(True, 'nothing done', None, [lane.model])
+            return write_done(lane, cwd, prompt, extra)
+        tid = self.make(work)
+        self.env.run()
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertEqual(self.lanes, ['gemma_codex'] * 3 + ['luna_high'])   # nudge free, then 2 passes
+        self.assertEqual(self.env.db.task(tid)['data']['local_first']['passes'], 2)
+
+    def test_delivery_note_does_not_claim_a_review_of_escalated_work(self):
+        tid = self.make(write_done, verdict=lambda n: spec_verdict(['rows keep restated']))
+        self.env.run()
+        t = self.env.db.task(tid)
+        msg = sh(self.env.target, 'git', 'log', '-1', '--format=%B', t['branch'] or f'aa/{tid}')
+        self.assertIn('Spec review: skipped', msg)
+        self.assertIn('Local first attempt not accepted (review); the delivered work is by luna_high.', msg)
+
+    def test_race_tiers_skip_local_first(self):
+        self.env = Env(self.tmp, {'triage': triage('medium_tough'), 'work': write_done}, FakeCLM('medium_tough'),
+                       triage=False, spec=False, best_of_2=True)
+        self.env.cfg.data['local_first']['enabled'] = True
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run()
+        t = self.env.db.task(tid)
+        self.assertNotIn('local_first', t['data'])
+        self.assertNotIn('gemma_codex', t['data'].get('lanes_tried', []))
+
+    def test_local_worker_url_must_be_loopback(self):
+        from aa.workers import loopback_url
+        self.assertEqual(loopback_url('http://127.0.0.1:8100/v1'), 'http://127.0.0.1:8100/v1')
+        for bad in ('https://api.example.com/v1', 'http://127.0.0.1.evil.test/v1', 'file:///etc/passwd'):
+            with self.assertRaises(ValueError):
+                loopback_url(bad)
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp},
+                                                     'local_worker': {'base_url': 'http://evil.test/v1", x="1'}})
+            w = Workers(cfg, runner=runner)
+            with self.assertRaises(ValueError):
+                w.execute(LANES['gemma_codex'], 'p', Path(tmp))
+        runner.assert_not_called()
+
+    def test_local_codex_command_uses_the_loopback_provider_without_billing_check(self):
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(config.load(Path('/nonexistent'), {'paths': {'state_dir': tmp}}), runner=runner)
+            w.verify_billing = mock.Mock(side_effect=AssertionError('no subscription check for the local lane'))
+            w.execute(LANES['gemma_codex'], 'p', Path(tmp))
+        cmd = ' '.join(runner.call_args[0][0])
+        self.assertIn('model_provider="aa_local"', cmd)
+        self.assertIn('base_url="http://127.0.0.1:8100/v1"', cmd)
+        self.assertIn('gemma-4-31b', cmd)
+        self.assertIn('memories.use_memories=false', cmd)
+        self.assertIn('requires_openai_auth=false', cmd)

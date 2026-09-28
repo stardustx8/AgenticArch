@@ -37,7 +37,19 @@ LANES: dict[str, Lane] = {l.name: l for l in (
     Lane('opus_high', 'claude', 'claude-opus-5-5', 'high', 2),
     # Local model (loopback vLLM, no subscription): neutral judge and extra test writer only.
     Lane('gemma_local', 'local', 'gemma-4-31b', 'n/a', 2),
+    # The same local model as a Codex worker (local_first, round B): Codex with a loopback provider.
+    Lane('gemma_codex', 'codex', 'gemma-4-31b', 'high', 1),
 )}
+LOCAL_CODEX = {'gemma_codex'}      # Codex lanes that talk to the loopback model, never to OpenAI
+
+
+def loopback_url(url: str) -> str:
+    """The local worker's endpoint must stay on this machine (it gets no subscription check)."""
+    from urllib.parse import urlparse
+    u = urlparse(str(url))
+    if u.scheme not in ('http', 'https') or u.hostname not in ('127.0.0.1', 'localhost', '::1'):
+        raise ValueError(f'local_worker.base_url must be a loopback http(s) URL, got {url!r}')
+    return str(url)
 
 # Removed from every child process: any of these could switch a CLI to API billing
 # or to another provider/endpoint.
@@ -92,6 +104,7 @@ class Workers:
         self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
         self.codex_no_memories = bool(cfg['workers'].get('codex_no_memories', True))
+        self.local_worker = cfg.data.get('local_worker') or {}
         self.logs = cfg.logs
         self.run = runner
         self._auth_ok: dict[str, float] = {}
@@ -130,7 +143,8 @@ class Workers:
     def execute(self, lane: Lane, prompt: str, cwd: Path, *, write: bool = True,
                 extra_dirs: tuple[Path, ...] = (), schema: dict | None = None,
                 log_name: str = 'job') -> Result:
-        self.verify_billing(lane.cli)
+        if lane.name not in LOCAL_CODEX:           # the loopback model needs no subscription login
+            self.verify_billing(lane.cli)
         self.logs.mkdir(parents=True, exist_ok=True)
         log = self.logs / f'{time.strftime("%Y%m%d-%H%M%S")}-{log_name}-{lane.name}.log'
         t0 = time.time()
@@ -156,6 +170,15 @@ class Workers:
             schema_file = log.with_suffix('.schema.json')
             schema_file.write_text(json.dumps(schema))
             cmd += ['--output-schema', str(schema_file)]
+        if lane.name in LOCAL_CODEX:
+            lw = self.local_worker
+            url = loopback_url(lw.get('base_url', 'http://127.0.0.1:8100/v1'))
+            # json.dumps quotes the value (no TOML injection); the provider never gets the ChatGPT login.
+            cmd += ['-c', 'model_provider="aa_local"',
+                    '-c', f'model_providers.aa_local={{name="aa-local", base_url={json.dumps(url)}, '
+                          'wire_api="responses", requires_openai_auth=false}',
+                    '-c', f'model_context_window={int(lw.get("context_window", 131072))}',
+                    '-c', 'apply_patch_tool_type="function"']
         if self.codex_no_memories:
             # Suppresses automatic memory use and generation for this call only (not filesystem reads).
             cmd += ['-c', 'features.memories=false', '-c', 'memories.use_memories=false',

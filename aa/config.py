@@ -130,6 +130,21 @@ DEFAULTS: dict[str, Any] = {
         'enabled': False,
         'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
+    'local_first': {
+        # Round B (owner, 2026-09-28): the local Gemma (driven by Codex, no subscription) works first on these
+        # tiers. After the checks pass, an independent review (review_lane) judges the diff against the request
+        # (the same spec judge); if it is not satisfied, or the checks keep failing, the task escalates to the
+        # lane the tier would have used. Local-a-r1: 13/24 alone, so never without the review.
+        'enabled': False,
+        'tiers': ['bounded', 'medium_tough'],
+        'lane': 'gemma_codex',
+        'review_lane': 'luna_high',
+    },
+    'local_worker': {
+        # Codex pointed at the loopback vLLM (Responses API, tool calling, >= 64k context; round-a.conf).
+        'base_url': 'http://127.0.0.1:8100/v1',
+        'context_window': 131072,
+    },
     'spec_check': {
         # After the checks pass, an independent reviewer judges every acceptance criterion
         # against the diff (owner decision 2026-09-26: Opus 5.5, max 3 loops, then the owner).

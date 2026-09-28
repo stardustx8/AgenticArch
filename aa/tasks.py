@@ -18,7 +18,7 @@ from .db import DB
 from .notify import Notifier
 from .decisions import PEER_LANES, peer_question, tier_question
 from .quality import QualityMixin, cleanup_quality_worktrees
-from .workers import LANES, BillingError, Workers
+from .workers import LOCAL_CODEX, LANES, BillingError, Workers
 
 PROMPTS = Path(__file__).parent / 'prompts'
 
@@ -227,6 +227,14 @@ class TaskFlow(QualityMixin):
             self._to_deep(t, 'tier tough')
             return
         lane = TIER_LANE.get(t['tier']) or self._choose_peer(t, exclude=())
+        lf = self.cfg['local_first']
+        race = self.cfg['best_of_2'].get('enabled', True) and t['tier'] in self.cfg['best_of_2'].get('tiers', [])
+        if lf.get('enabled') and t['tier'] in lf.get('tiers', []) and not race:
+            if lf['lane'] not in LOCAL_CODEX:
+                raise ValueError(f'local_first.lane must be a loopback Codex lane, got {lf["lane"]!r}')
+            t['data']['local_first'] = {'then': lane}      # the paid lane if the local attempt is not accepted
+            self.db.event('local_first', t['id'], lane=lf['lane'], then=lane)
+            lane = lf['lane']
         self._plan_quality(t, lane)          # oracle tests / best-of-2 triggers, then the lane
 
     def _backend(self) -> str:
@@ -336,6 +344,19 @@ class TaskFlow(QualityMixin):
             self.n.send(f'Blocked {t["id"]}', f'Subscription check failed: {exc}', tags='warning')
             return
         report = worker_report(res)
+        # A plain-text turn fails the output schema (res.ok False), so do not require res.ok here; timeouts and
+        # a question to the owner are handled by the normal paths.
+        if self._is_local(t) and res.error != 'timeout' and report['status'] != 'blocked' \
+                and not git.git(wt, 'status', '--porcelain', check=False).strip() \
+                and not t['data'].get('empty_nudged'):
+            # Local models sometimes announce a step and end the turn without any tool call (local-a-r1:
+            # 4 of 24). One free nudge; a second empty turn counts as a normal failed pass.
+            t['data']['empty_nudged'] = True
+            t['data']['last_failure'] = ('Your previous turn ended without changing any file. Do the task now: '
+                                         'read the code, make the changes and run the checks before you answer.')
+            self.db.event('empty_turn_nudge', t['id'], lane=lane.name)
+            self.db.update_task(t['id'], status='READY', data=t['data'])
+            return
         free_rerun = t['data'].pop('spec_rerun', False) or t['data'].pop('answer_rerun', False)
         passes = t['passes'] + (0 if free_rerun else 1)         # spec loops / owner answers: own budget
         lane_passes = t['lane_passes'] + (0 if free_rerun else 1)
@@ -446,7 +467,7 @@ class TaskFlow(QualityMixin):
             self.db.decision_outcome(t['id'], 'tier', 'pass')
             self.db.decision_outcome(t['id'], 'best_of_2', 'pass')
             self.db.decision_outcome(t['id'], 'peer', 'pass')
-            if self.cfg['spec_check'].get('enabled', True):
+            if self.cfg['spec_check'].get('enabled', True) or self._is_local(t):
                 self.db.update_task(t['id'], status='SPEC', data=t['data'])
             else:
                 self.db.update_task(t['id'], status='DELIVER', data=t['data'])
@@ -542,11 +563,32 @@ class TaskFlow(QualityMixin):
             return
         elif t['lane'] == 'luna_high':
             nxt = self._choose_peer(t, exclude=tried)
+        elif self._is_local(t):
+            self._escalate_from_local(t, 'checks')
+            return
         else:
             # Try the other medium-tough model before giving up on local implementation.
             nxt = next((p for p in MEDIUM_PEERS if p not in tried), None)
         self.db.event('escalate', t['id'], frm=t['lane'], to=nxt)
         self._start_lane(t, nxt)
+
+    # ------------------------------------------------------------ local first
+    def _is_local(self, t: dict) -> bool:
+        return bool(t['data'].get('local_first')) and t['lane'] == self.cfg['local_first'].get('lane', 'gemma_codex')
+
+    def _after_local(self, t: dict) -> str | None:
+        then = (t['data'].get('local_first') or {}).get('then')
+        tried = tuple(t['data'].get('lanes_tried', []))
+        return then if then and then not in tried else self._choose_peer(t, exclude=tried)
+
+    def _escalate_from_local(self, t: dict, reason: str) -> None:
+        nxt = self._after_local(t)
+        t['data']['local_first']['escalated'] = reason
+        # Local attempts have their own budget (max_passes_per_lane): the paid lanes keep the full budget.
+        t['data']['local_first']['passes'] = t['passes']
+        self.db.event('escalate', t['id'], frm=t['lane'], to=nxt, reason=reason)
+        self.db.update_task(t['id'], passes=0, data=t['data'])
+        self._start_lane(self.db.task(t['id']), nxt)
 
     # ------------------------------------------------------------ spec check
     def _spec_check(self, t: dict) -> None:
@@ -568,7 +610,9 @@ class TaskFlow(QualityMixin):
                         criteria='\n'.join(f'{i + 1}. {c}' for i, c in enumerate(criteria)), diff=diff,
                         rebuttals=(('\nThe worker rebutted earlier findings:\n' + '\n'.join(rebuttals) + '\n')
                                    if rebuttals else '') + check_note + self._quality_note_for_judge(t))
-        res = self.workers.execute(LANES[sc['lane']], prompt, wt, write=False, schema=SPEC_SCHEMA,
+        local = self._is_local(t)          # local-first review: an independent paid model, then accept or escalate
+        judge = self.cfg['local_first'].get('review_lane', 'luna_high') if local else sc['lane']
+        res = self.workers.execute(LANES[judge], prompt, wt, write=False, schema=SPEC_SCHEMA,
                                    log_name=f'{t["id"]}-spec')
         if not res.ok or not res.structured:
             raise RuntimeError(f'spec judge failed: {res.error[:300]}')   # daemon retries, then BLOCKED
@@ -580,13 +624,22 @@ class TaskFlow(QualityMixin):
         unmet = [c for c in verdict['criteria'] if not c['met']]
         loops = t['data'].get('spec_loops', 0)
         t['data'].setdefault('spec_reviews', []).append(
-            {'loop': loops, 'unmet': unmet, 'tampering': verdict['tampering'],
+            {'loop': loops, 'lane': t['lane'], 'judge': judge, 'unmet': unmet, 'tampering': verdict['tampering'],
              'tampering_reason': verdict['tampering_reason'], 'seconds': round(res.seconds)})
         t['data'].pop('rebuttals', None)
         if not unmet and not verdict['tampering']:
+            if local:
+                t['data']['local_first']['accepted'] = True
             self.db.update_task(t['id'], status='DELIVER', data=t['data'])
             return
         feedback = self._spec_feedback(unmet, verdict)
+        if local:
+            # No review loops with the local model: the paid lane takes over the worktree with the findings.
+            t['data']['last_failure'] = ('A first attempt by another model passes the checks, but an independent '
+                                         f'review found it does not meet the request:\n{feedback}\n'
+                                         'Fix these points; keep what is correct.')
+            self._escalate_from_local(t, 'review')
+            return
         if loops >= int(sc['max_loops']) + t['data'].get('spec_extra', 0):
             t['data']['spec_wait'] = True
             self.db.update_task(t['id'], status='WAIT_OWNER', data=t['data'])
@@ -638,13 +691,17 @@ class TaskFlow(QualityMixin):
         wt = Path(t['worktree'])
         title = t['prompt'].strip().splitlines()[0][:72]
         git.git(wt, 'reset', '-q', '--soft', t['base_ref'])     # squash the wip snapshots
-        spec = t['data'].get('spec_reviews') or []
+        # Only reviews of the delivered lane's work count (a rejected local attempt is noted separately).
+        spec = [r for r in t['data'].get('spec_reviews') or [] if r.get('lane', t['lane']) == t['lane']]
+        rejected_local = (t['data'].get('local_first') or {}).get('escalated')
         triage_notes = t['data'].get('triage_notes') or {}
         spec_note = ((''.join(f'Note: check {k} {"was flaky (passed on rerun)" if v == "FLAKY" else "already failed on the base commit"}.\n'
                               for k, v in triage_notes.items())) +
                      f'Spec review: {len(spec)} round(s)' +
                      (', accepted by owner' if t['data'].get('spec_accepted_by_owner') else ', all criteria met')
-                     if spec else 'Spec review: skipped')
+                     if spec else 'Spec review: skipped') + (
+                         f'\nLocal first attempt not accepted ({rejected_local}); the delivered work is by {t["lane"]}.'
+                         if rejected_local else '')
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
                                  f'Checks:\n{t["data"].get("checks_result", "")}\n{spec_note}')
         stat = git.diffstat(wt, t['base_ref'])
