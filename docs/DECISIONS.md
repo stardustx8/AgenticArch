@@ -142,3 +142,21 @@ contents 0.63, SemIf on paths 0.50, SemIf on paths + first 40 lines 0.40, path k
 random 0.23; SemIf re-ranking a BM25 top 15 did not help (0.64). Dev and test halves agree.
 Now: triage relevant paths first, then BM25 (`aa/retrieval.py`), no model. Commit messages
 are cleaner than real requests, which flatters every method alike.
+
+## D023: the owner's request is authoritative; triage criteria stay out of worker prompts, added 2026-09-28
+
+Lab evidence (private research branch, results/noharness-r1, diag-r1..diag4): plain `codex exec`
+with GPT-6 Astra high solved the ultra-hard lab projects 8/8, the aa simple pipeline 4/6. The
+difference was one contract detail on u04_revenue (`restated: bool` on every monthly_revenue row).
+The triage paraphrased it as "marks that month with restated: true" and invented an extra
+requirement; workers followed the paraphrase and even rewrote docs/contracts.md to match. On aa's
+own stage-1 code: original worker prompt 1/8, triage criteria as "hints" 6/8, no triage criteria
+8/8, raw request 8/8.
+Now: the worker prompt carries the request as authoritative, the repository's docs and contracts
+as the definition of done, and no triage criteria; the reading list is "possibly useful starting
+points". Oracle authors get no triage criteria. The spec judge keeps the criteria as a checklist
+but judges the task as written as the last criterion and treats criteria as a paraphrase. Triage
+must restate only what the request or repository requires and never add requirements. New guard:
+edits to existing specification documents (contract/spec/interface/requirement/api files, spec(s)/
+and contract(s)/ directories) are recorded, shown to the spec judge with the original text, and
+named in the delivery result.

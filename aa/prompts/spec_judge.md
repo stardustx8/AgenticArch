@@ -9,7 +9,10 @@ Task:
 $prompt
 >>>
 
-Acceptance criteria (judge each one, in this order):
+Acceptance criteria (judge each one, in this order). They are a triage paraphrase and may be
+incomplete or wrong: where one differs from the task above or from the repository's own
+documentation and contracts, judge what the task and repository actually require and say so in
+the reason. The last criterion always covers the task as written.
 $criteria
 
 Diff of the worker's change (base $base):
