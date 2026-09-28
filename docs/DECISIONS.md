@@ -181,3 +181,18 @@ Luna finding for routing: Luna high solved 2-3/8 of the ultra-hard projects with
 passed the visible checks, so escalation on failed checks never fired. Routing hard work to Astra has to
 rely on the triage tier (or a stronger trigger), not on check failures.
 
+## D025: local-first lane (experimental, off by default), added 2026-09-28
+
+Round A (private research branch, results/local-a-r1, local-a-diag): Codex can drive the local Gemma 4 31B
+(vLLM with the gemma4 tool and reasoning parsers, 128k context) as a worker at zero subscription quota. Plain
+local Gemma solved 13/24 of the ho01 DEV tasks (aa on Luna: 80%). 4 of the 24 runs ended after one sentence
+without any tool call.
+Built for round B, all behind `local_first.enabled` (off): lane `gemma_codex` (Codex with a loopback
+provider, no subscription check), routing of the configured tiers to it first, one free nudge after a turn
+that changed nothing, and after the checks pass a mandatory independent review of the diff against the
+request (the spec judge, on `local_first.review_lane`, default Luna high), even when `spec_check` is off.
+Review findings or exhausted local passes escalate to the lane the tier would have used, which continues in
+the same worktree with the findings. No review loops with the local model.
+The owner rejected "escalate only on failed checks": the visible tests miss new requirements (Luna rounds),
+so quality must not depend on someone adding tests.
+
