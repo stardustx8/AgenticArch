@@ -131,9 +131,9 @@ DEFAULTS: dict[str, Any] = {
         'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
     'tier_lanes': {
-        # Which worker takes routine and bounded tasks (default Luna low / Luna high). Owner idea
-        # 2026-09-28: Claude Opus for these, measured in round C before any default change.
-        'routine': 'luna_low',
+        # Which worker takes routine and bounded tasks. Owner decision 2026-09-28 (D027): Luna always at high
+        # effort; the published effort curves show low effort is far weaker for a few cents less per task.
+        'routine': 'luna_high',
         'bounded': 'luna_high',
     },
     'local_first': {
