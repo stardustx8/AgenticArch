@@ -130,6 +130,12 @@ DEFAULTS: dict[str, Any] = {
         'enabled': False,
         'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
+    'tier_lanes': {
+        # Which worker takes routine and bounded tasks (default Luna low / Luna high). Owner idea
+        # 2026-09-28: Claude Opus for these, measured in round C before any default change.
+        'routine': 'luna_low',
+        'bounded': 'luna_high',
+    },
     'local_first': {
         # Round B (owner, 2026-09-28): the local Gemma (driven by Codex, no subscription) works first on these
         # tiers. After the checks pass, an independent review (review_lane) judges the diff against the request
