@@ -91,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
+def notify_health(db, now: float) -> tuple[bool, str]:
+    """Failed ntfy deliveries of the last 24 h; only a failure in the last hour counts as FAIL."""
+    rows = db.q("SELECT ts, detail FROM events WHERE kind='notify_failed' AND ts > ? ORDER BY id DESC",
+                (now - 86400,))
+    if not rows:
+        return True, 'no failures'
+    return rows[0]['ts'] <= now - 3600, f'{len(rows)} failed; latest: {rows[0]["detail"]}'
+
+
 def doctor(cfg) -> int:
     from .clm import CLM
     from .workers import BillingError, Workers
@@ -129,9 +138,7 @@ def doctor(cfg) -> int:
         line('ntfy', True, cfg['ntfy']['url'])
     except OSError as exc:
         line('ntfy', False, str(exc))
-    fails = db.q("SELECT COUNT(*) AS n, MAX(detail) AS last FROM events WHERE kind='notify_failed' "
-                 "AND ts > ?", (time.time() - 86400,))[0]
-    line('ntfy deliveries (24 h)', not fails['n'], f"{fails['n']} failed; last: {fails['last']}" if fails['n'] else 'no failures')
+    line('ntfy deliveries (24 h)', *notify_health(db, time.time()))
     from . import git
     try:
         git.git(Path.home(), 'ls-remote', cfg['case_repo']['url'], timeout=30)

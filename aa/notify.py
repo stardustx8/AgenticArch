@@ -105,6 +105,8 @@ class Notifier:
 
 
 def _transient(exc: OSError) -> bool:
+    # No HTTP code = connection error or timeout. A timed-out POST may already have been accepted,
+    # so a retry can duplicate a push; a duplicate is preferred over a lost question.
     code = getattr(exc, 'code', None)
     return code is None or code == 429 or code >= 500
 

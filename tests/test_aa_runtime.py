@@ -1652,3 +1652,19 @@ class NotifyFailureTests(unittest.TestCase):
             n.poll_replies()
         kinds = [r['kind'] for r in n.db.q("SELECT kind FROM events WHERE kind LIKE 'notify_poll%' ORDER BY id")]
         self.assertEqual(kinds, ['notify_poll_failed', 'notify_poll_recovered'])
+
+    def test_doctor_reports_the_latest_failure_and_fails_only_while_recent(self):
+        from aa.cli import notify_health
+        db = DB(':memory:')
+        self.assertEqual(notify_health(db, 1e9), (True, 'no failures'))
+        with mock.patch('time.time', lambda: 1e9 - 7200):
+            db.event('notify_failed', title='zzz old', error='429')
+        with mock.patch('time.time', lambda: 1e9 - 60):
+            db.event('notify_failed', title='aaa new', error='429')
+        good, detail = notify_health(db, 1e9)
+        self.assertFalse(good)
+        self.assertIn('2 failed; latest:', detail)
+        self.assertIn('aaa new', detail)
+        good, detail = notify_health(db, 1e9 + 3700)
+        self.assertTrue(good)
+        self.assertIn('aaa new', detail)
