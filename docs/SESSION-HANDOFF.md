@@ -91,6 +91,24 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   - Backend and frontend tests run; python-ldap needs `sudo apt install libldap2-dev libsasl2-dev`, a lab stub is in place until then.
   - Arms: planner split plus Jev routing, vs planner routing. Specs and hidden exams still to write.
 
+## 2026-09-29 night and morning
+
+- PR #12 was merged (D028): Claude Opus 5.5 high builds routine and bounded tasks, failed passes go to Astra, and the
+  review (`spec_check`) stays off by default. The daemon was restarted on it.
+- Rounds, all in the private repo `results/`:
+  - round-d-r2: the review added no correctness (20/24 with it, 21/24 without).
+  - round-e-r1/r2: on Mealie, one Opus 5.5 high call built each spec alone, 4/4 correct in 13.3 min. That is as
+    correct as the split-and-route runs and faster.
+  - file-choice-r1: one multiple-choice question beats per-file yes/no (Jev 0.60, SemIf 0.47 MRR).
+  - confidence-r1 / grading-prompts-r1: Opus's confidence from the diff alone does not flag wrong deliveries. With
+    the project readable it did on the one pair tested. A re-run on all 63 deliveries is proposed, pending the owner.
+  - semif-ft-r1: SemIf trained locally with LoRA on git-history labels reaches Jev (0.60 test MRR).
+    - Run 2 (4B, 16 repos) finishes on its own: unit semif-r2-finish scores it, restarts `aa-gemma` and pings
+      channel 1.
+    - Run 3 (Qwen3.5-9B) is on hold for the owner.
+    - The trained adapter is not deployed into aa: that needs an owner decision.
+- `aa-gemma` was paused for training (owner approved) and is restarted by the finish script.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).
