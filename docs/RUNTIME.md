@@ -27,6 +27,8 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
   -> routine, bounded: opus_high (tier_lanes, D028; fails -> astra_high) | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
+  -> [opt-in] confidence check (D029): read-only model rates p(meets the request); p < 0.75 -> Fable 5.1 reworks
+     the worktree once; still low -> deep case
   -> [opt-in] oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
      (+ an extra set by local Gemma; in races Gemma is the neutral main author),
      validated (syntax, must fail on base; one repair round), read-only for workers;

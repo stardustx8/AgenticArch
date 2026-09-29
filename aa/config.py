@@ -161,6 +161,17 @@ DEFAULTS: dict[str, Any] = {
         'lane': 'opus_medium',
         'max_loops': 3,
     },
+    'confidence_check': {
+        # Round F (owner, 2026-09-29): after the checks (and the spec review, if on) an independent read-only model
+        # rates the probability that the change meets the request including unstated expectations (the tested
+        # checklist prompt, confidence-r2: AUROC 0.90 with the worktree readable). Below the threshold the
+        # rework lane takes over the worktree with the check's points; still below after that -> deep case.
+        'enabled': False,
+        'lane': 'opus_medium',
+        'threshold': 0.75,
+        'rework_lane': 'fable_high',
+        'max_reworks': 1,
+    },
     'delivery': {
         'push_branch': True,
     },

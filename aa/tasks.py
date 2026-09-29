@@ -56,7 +56,7 @@ TRIAGE_SCHEMA = {
     },
 }
 
-ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 'DELIVER')
+ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 'CONFIDENCE', 'DELIVER')
 
 WORKER_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -82,6 +82,13 @@ SPEC_SCHEMA = {
         'tampering': {'type': 'boolean'},
         'tampering_reason': {'type': 'string'},
     },
+}
+
+CONFIDENCE_SCHEMA = {    # identical to the lab's confidence-r1/r2 answer format
+    'type': 'object', 'additionalProperties': False, 'required': ['ambiguities', 'unverified', 'probability'],
+    'properties': {'ambiguities': {'type': 'array', 'items': {'type': 'string'}},
+                   'unverified': {'type': 'array', 'items': {'type': 'string'}},
+                   'probability': {'type': 'number', 'minimum': 0, 'maximum': 1}},
 }
 
 
@@ -133,7 +140,7 @@ class TaskFlow(QualityMixin):
         handler = {'NEW': self._triage, 'TRIAGED': self._route, 'ORACLE': self._oracle, 'RACE': self._race,
                    'MAP': self._map,
                    'READY': self._work,
-                   'VERIFY': self._verify, 'SPEC': self._spec_check,
+                   'VERIFY': self._verify, 'SPEC': self._spec_check, 'CONFIDENCE': self._confidence_check,
                    'DELIVER': self._deliver}.get(t['status'])
         if handler:
             handler(t)
@@ -476,7 +483,7 @@ class TaskFlow(QualityMixin):
             if self.cfg['spec_check'].get('enabled', True) or self._is_local(t):
                 self.db.update_task(t['id'], status='SPEC', data=t['data'])
             else:
-                self.db.update_task(t['id'], status='DELIVER', data=t['data'])
+                self.db.update_task(t['id'], status=self._after_review(), data=t['data'])
         else:
             t['data']['last_failure'] = checks_mod.failure_report(failed)
             self.db.update_task(t['id'], data=t['data'])
@@ -636,7 +643,7 @@ class TaskFlow(QualityMixin):
         if not unmet and not verdict['tampering']:
             if local:
                 t['data']['local_first']['accepted'] = True
-            self.db.update_task(t['id'], status='DELIVER', data=t['data'])
+            self.db.update_task(t['id'], status=self._after_review(), data=t['data'])
             return
         feedback = self._spec_feedback(unmet, verdict)
         if local:
@@ -656,6 +663,50 @@ class TaskFlow(QualityMixin):
                                  ('Cancel', f'cancel {t["id"]}')], priority=4, tags='mag')
             return
         self._send_back(t, feedback)
+
+    # ------------------------------------------------------- confidence check
+    def _after_review(self) -> str:
+        return 'CONFIDENCE' if self.cfg['confidence_check'].get('enabled') else 'DELIVER'
+
+    def _confidence_check(self, t: dict) -> None:
+        """Independent read-only estimate that the change meets the request, unstated expectations included."""
+        cc = self.cfg['confidence_check']
+        wt = Path(t['worktree'])
+        diff = git.git(wt, 'diff', f'{t["base_ref"]}..HEAD', check=False)
+        if len(diff) > 60000:
+            diff = diff[:60000] + '\n[diff truncated; read the files in the worktree]'
+        res = self.workers.execute(LANES[cc['lane']], render('confidence_check.md', worktree=wt, prompt=t['prompt'],
+                                                             diff=diff),
+                                   wt, write=False, schema=CONFIDENCE_SCHEMA, log_name=f'{t["id"]}-conf')
+        p = (res.structured or {}).get('probability')
+        if not res.ok or isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1:
+            raise RuntimeError(f'confidence check failed: {res.error[:300]}')   # daemon retries, then BLOCKED
+        verdict = res.structured
+        checks = t['data'].setdefault('confidence_checks', [])
+        checks.append({'lane': t['lane'], 'judge': cc['lane'], 'probability': p,
+                       'ambiguities': verdict.get('ambiguities') or [], 'unverified': verdict.get('unverified') or [],
+                       'seconds': round(res.seconds)})
+        threshold = float(cc['threshold'])
+        self.db.event('confidence_check', t['id'], lane=t['lane'], probability=p, threshold=threshold)
+        if p >= threshold:
+            self.db.update_task(t['id'], status='DELIVER', data=t['data'])
+            return
+        reworks = t['data'].get('confidence_reworks', 0)
+        rework = cc.get('rework_lane')
+        if reworks < int(cc.get('max_reworks', 1)) and rework in LANES and rework != t['lane']:
+            t['data']['confidence_reworks'] = reworks + 1
+            points = [f'- Ambiguous: {a}' for a in checks[-1]['ambiguities']] + \
+                     [f'- Not verified: {u}' for u in checks[-1]['unverified']]
+            t['data']['last_failure'] = (
+                f'The checks pass, but an independent reviewer who read the whole project rates the chance that this '
+                f'change fully meets the request, including what a careful maintainer would expect without being '
+                f'told, at only {p:.0%}. Its points:\n' + ('\n'.join(points) or '- (none listed)') + '\n'
+                'Look for what is really missing (for example the same problem elsewhere, related functions, edge '
+                'cases) and complete the change; keep what is correct and do not weaken tests.')
+            self.db.event('escalate', t['id'], frm=t['lane'], to=rework, reason='confidence')
+            self._start_lane(t, rework)
+            return
+        self._to_deep(t, f'confidence check {p:.2f} below {threshold:.2f} after {reworks} rework(s); last by {t["lane"]}')
 
     @staticmethod
     def _spec_feedback(unmet: list[dict], verdict: dict) -> str:
@@ -708,6 +759,11 @@ class TaskFlow(QualityMixin):
                      if spec else 'Spec review: skipped') + (
                          f'\nLocal first attempt not accepted ({rejected_local}); the delivered work is by {t["lane"]}.'
                          if rejected_local else '')
+        conf = [c for c in t['data'].get('confidence_checks') or [] if c.get('lane') == t['lane']]
+        if conf:
+            spec_note += f'\nConfidence check: {conf[-1]["probability"]:.0%} by {conf[-1]["judge"]}' + (
+                f' (after a rework; the first attempt got {t["data"]["confidence_checks"][0]["probability"]:.0%})'
+                if t['data'].get('confidence_reworks') else '')
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
                                  f'Checks:\n{t["data"].get("checks_result", "")}\n{spec_note}')
         stat = git.diffstat(wt, t['base_ref'])

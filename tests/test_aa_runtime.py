@@ -79,6 +79,8 @@ class FakeWorkers(Workers):
         kind = _kind(log_name)
         if kind == 'spec' and 'spec' not in self.script:
             return Result(True, '', _complete_verdict(spec_verdict([]), prompt), [lane.model])   # all met
+        if kind == 'conf' and 'conf' not in self.script:
+            return Result(True, '', {'ambiguities': [], 'unverified': [], 'probability': 0.9}, [lane.model])
         if kind == 'pick' and 'pick' not in self.script:
             return Result(True, '', {'winner': 'A', 'reason': 'default'}, [lane.model])
         fn = self.script[kind]
@@ -112,6 +114,8 @@ def spec_verdict(unmet: list[str], tampering: bool = False) -> dict:
 def _kind(log_name: str) -> str:
     if log_name.endswith('-spec'):
         return 'spec'
+    if log_name.endswith('-conf'):
+        return 'conf'
     if log_name.endswith('-oracle'):
         return 'oracle'
     if log_name.endswith('-map'):
@@ -150,7 +154,7 @@ LUNA_TIER_LANES = {'routine': 'luna_high', 'bounded': 'luna_high'}
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
                  triage=True, oracle=False, best_of_2=False, local=False, ideas=None, spec=True,
-                 tier_lanes=LUNA_TIER_LANES):
+                 tier_lanes=LUNA_TIER_LANES, confidence=False):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -171,6 +175,7 @@ class Env:
             'triage': {'policy': policy},
             'failure_triage': {'enabled': triage},
             'spec_check': {'enabled': spec},     # most flow tests exercise the judge (off by default, D024)
+            'confidence_check': {'enabled': confidence},
             'oracle_tests': {'enabled': oracle},
             'best_of_2': {'enabled': best_of_2},
             'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
@@ -2012,6 +2017,84 @@ class LocalFirstTests(unittest.TestCase):
         self.assertIn('gemma-4-31b', cmd)
         self.assertIn('memories.use_memories=false', cmd)
         self.assertIn('requires_openai_auth=false', cmd)
+
+
+class ConfidenceCheckTests(unittest.TestCase):
+    """Round F (2026-09-29): a read-only confidence check after the checks; low -> Fable rework; still low -> deep."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.lanes, self.prompts, self.conf_prompts = [], {}, []
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def events(self, tid):
+        return [(r['kind'], json.loads(r['detail'])) for r in
+                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
+
+    def run_task(self, probs, confidence=True):
+        probs = list(probs)
+
+        def work(lane, cwd, prompt, extra):
+            self.lanes.append(lane.name); self.prompts[lane.name] = prompt
+            (cwd / 'done.txt').write_text(lane.name)
+            return Result(True, 'done', None, [lane.model])
+
+        def conf(lane, cwd, prompt, extra):
+            self.conf_prompts.append((lane.name, prompt))
+            return Result(True, '', {'ambiguities': ['quotes too?'], 'unverified': ['render_link'],
+                                     'probability': probs.pop(0)}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work, 'conf': conf}, FakeCLM('bounded'),
+                       triage=False, spec=False, tier_lanes=None, confidence=confidence)
+        tid = self.env.app.tasks.create(self.env.target, 'fix the escaping')
+        self.env.run(60)
+        return tid, self.env.db.task(tid)
+
+    def test_off_by_default(self):
+        self.assertFalse(config.load(Path('/nonexistent'))['confidence_check']['enabled'])
+        tid, t = self.run_task([], confidence=False)
+        self.assertEqual((t['status'], self.lanes, self.conf_prompts), ('DONE', ['opus_high'], []))
+
+    def test_confident_change_is_delivered(self):
+        tid, t = self.run_task([0.9])
+        self.assertEqual((t['status'], t['lane'], self.lanes), ('DONE', 'opus_high', ['opus_high']))
+        lane, prompt = self.conf_prompts[0]
+        self.assertEqual(lane, 'opus_medium')
+        self.assertIn('fix the escaping', prompt)
+        self.assertIn('done.txt', prompt)                        # the committed diff is shown
+        self.assertIn('unstated ones', prompt)                   # the tested checklist wording
+        msg = sh(self.env.target_origin, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
+        self.assertIn('Confidence check: 90% by opus_medium', msg)
+
+    def test_low_confidence_hands_the_worktree_to_fable(self):
+        tid, t = self.run_task([0.3, 0.85])
+        self.assertEqual((t['status'], t['lane']), ('DONE', 'fable_high'))
+        self.assertEqual(self.lanes, ['opus_high', 'fable_high'])
+        self.assertIn('30%', self.prompts['fable_high'])
+        self.assertIn('render_link', self.prompts['fable_high'])  # the check's points reach the rework
+        self.assertIn(('escalate', {'frm': 'opus_high', 'to': 'fable_high', 'reason': 'confidence'}), self.events(tid))
+        self.assertEqual([c['probability'] for c in t['data']['confidence_checks']], [0.3, 0.85])
+
+    def test_still_low_after_the_rework_goes_to_a_deep_case(self):
+        tid, t = self.run_task([0.3, 0.4])
+        self.assertEqual(t['status'], 'DEEP')
+        self.assertEqual(self.lanes, ['opus_high', 'fable_high'])
+        self.assertIn('confidence check 0.40 below 0.75 after 1 rework(s)', t['result'])
+
+    def test_a_broken_check_answer_is_not_a_pass(self):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('x'); return Result(True, 'done', None, [lane.model])
+        bad = lambda lane, cwd, prompt, extra: Result(True, '', {'ambiguities': [], 'unverified': [], 'probability': True},
+                                                       [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work, 'conf': bad}, FakeCLM('bounded'),
+                       triage=False, spec=False, tier_lanes=None, confidence=True)
+        tid = self.env.app.tasks.create(self.env.target, 'x')
+        self.env.run(60)
+        self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
 
 
 class TierLaneTests(unittest.TestCase):
