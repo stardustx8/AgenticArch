@@ -679,7 +679,7 @@ class TaskFlow(QualityMixin):
                                                              diff=diff),
                                    wt, write=False, schema=CONFIDENCE_SCHEMA, log_name=f'{t["id"]}-conf')
         p = (res.structured or {}).get('probability')
-        if not res.ok or not isinstance(p, (int, float)) or not 0 <= p <= 1:
+        if not res.ok or isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1:
             raise RuntimeError(f'confidence check failed: {res.error[:300]}')   # daemon retries, then BLOCKED
         verdict = res.structured
         checks = t['data'].setdefault('confidence_checks', [])

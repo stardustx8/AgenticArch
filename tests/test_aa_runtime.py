@@ -2088,7 +2088,8 @@ class ConfidenceCheckTests(unittest.TestCase):
     def test_a_broken_check_answer_is_not_a_pass(self):
         def work(lane, cwd, prompt, extra):
             (cwd / 'done.txt').write_text('x'); return Result(True, 'done', None, [lane.model])
-        bad = lambda lane, cwd, prompt, extra: Result(True, '', {'ambiguities': [], 'unverified': []}, [lane.model])
+        bad = lambda lane, cwd, prompt, extra: Result(True, '', {'ambiguities': [], 'unverified': [], 'probability': True},
+                                                       [lane.model])
         self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work, 'conf': bad}, FakeCLM('bounded'),
                        triage=False, spec=False, tier_lanes=None, confidence=True)
         tid = self.env.app.tasks.create(self.env.target, 'x')
