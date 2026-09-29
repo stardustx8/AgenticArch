@@ -227,3 +227,15 @@ Owner decisions after rounds C and D (private results/round-c-r2, round-d-r2):
 - The review of each delivery (`spec_check`) stays off by default (D024). In round D, both review arms scored
   20/24 and the same tasks without a review 21/24; the review caught none of the wrong deliveries. It remains
   opt-in, e.g. for risky areas.
+
+## D029: confidence check with a rework lane (opt-in, round F), added 2026-09-29
+
+`confidence_check.enabled` (default off). After the checks pass (and after the spec review, if on), an independent
+read-only model (`lane`, default Opus 5.5 medium) reads the worktree and rates the probability that the change meets
+the request, including what a careful maintainer would expect without being told (`prompts/confidence_check.md`,
+the checklist prompt tested in private results/confidence-r2: AUROC 0.90 on 63 real deliveries, 16 of 21 wrong ones
+flagged at 6 of 42 right ones, p < 0.75). If p >= `threshold` (0.75), the change is delivered. Otherwise the rework
+lane (`fable_high`, Claude Fable 5.1 high) takes over the same worktree with the check's points (one rework,
+`max_reworks`), and the checks and the confidence check run again. Still below the threshold after that, the task
+opens a deep case (GPT-6 Pro / the owner). The owner proposed this chain; round F measures it live before it can
+become a default. The delivery note states the last check's probability.

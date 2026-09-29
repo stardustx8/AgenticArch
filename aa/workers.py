@@ -35,6 +35,7 @@ LANES: dict[str, Lane] = {l.name: l for l in (
     Lane('astra_high', 'codex', 'gpt-6-astra', 'high', 2),
     Lane('opus_medium', 'claude', 'claude-opus-5-5', 'medium', 2),
     Lane('opus_high', 'claude', 'claude-opus-5-5', 'high', 2),
+    Lane('fable_high', 'claude', 'claude-fable-5-1', 'high', 1),      # rework after a low confidence check (round F)
     # Local model (loopback vLLM, no subscription): neutral judge and extra test writer only.
     Lane('gemma_local', 'local', 'gemma-4-31b', 'n/a', 2),
     # The same local model as a Codex worker (local_first, round B): Codex with a loopback provider.
