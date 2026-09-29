@@ -144,9 +144,13 @@ def oracle_writer(body='test -f done.txt\n', command='sh tests/check_feature.sh'
     return fn
 
 
+LUNA_TIER_LANES = {'routine': 'luna_high', 'bounded': 'luna_high'}
+
+
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
-                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None, spec=True):
+                 triage=True, oracle=False, best_of_2=False, local=False, ideas=None, spec=True,
+                 tier_lanes=LUNA_TIER_LANES):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -171,6 +175,8 @@ class Env:
             'best_of_2': {'enabled': best_of_2},
             'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
             'ideas': ideas or {},
+            # The flow tests exercise the Luna ladder (race on escalation); the Opus default (D028) has its own tests.
+            **({'tier_lanes': dict(tier_lanes)} if tier_lanes is not None else {}),
         })
         self.db = DB(':memory:')
         self.clock = 1e9
@@ -2021,20 +2027,40 @@ class TierLaneTests(unittest.TestCase):
             self.env.close()
         self._tmp.cleanup()
 
+    def events(self, tid):
+        return [(r['kind'], json.loads(r['detail'])) for r in
+                self.env.db.q('SELECT kind, detail FROM events WHERE task_id=? ORDER BY id', (tid,))]
+
     def run_tier(self, tier, lanes=None):
         def work(lane, cwd, prompt, extra):
             self.lanes.append(lane.name); return write_done(lane, cwd, prompt, extra)
-        self.env = Env(self.tmp, {'triage': triage(tier), 'work': work}, FakeCLM(tier), triage=False, spec=False)
+        self.env = Env(self.tmp, {'triage': triage(tier), 'work': work}, FakeCLM(tier), triage=False, spec=False,
+                       tier_lanes=None)
         if lanes:
             self.env.cfg.data['tier_lanes'].update(lanes)
         tid = self.env.app.tasks.create(self.env.target, 'feature')
         self.env.run()
         return self.env.db.task(tid)
 
-    def test_defaults_stay_luna(self):
-        self.assertEqual(config.load(Path('/nonexistent'))['tier_lanes'], {'routine': 'luna_high', 'bounded': 'luna_high'})
-        self.assertEqual(self.run_tier('bounded')['status'], 'DONE')
-        self.assertEqual(self.lanes, ['luna_high'])
+    def test_defaults_are_opus_high(self):
+        self.assertEqual(config.load(Path('/nonexistent'))['tier_lanes'], {'routine': 'opus_high', 'bounded': 'opus_high'})
+        self.assertEqual(self.run_tier('routine')['status'], 'DONE')
+        self.assertEqual(self.lanes, ['opus_high'])
+
+    def test_failed_opus_passes_escalate_to_astra(self):
+        def work(lane, cwd, prompt, extra):
+            self.lanes.append(lane.name)
+            if lane.name == 'astra_high':
+                (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work}, FakeCLM('bounded'), triage=False,
+                       spec=False, tier_lanes=None)
+        tid = self.env.app.tasks.create(self.env.target, 'feature')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual((t['status'], t['lane']), ('DONE', 'astra_high'))
+        self.assertEqual(self.lanes, ['opus_high', 'opus_high', 'astra_high'])
+        self.assertIn(('escalate', {'frm': 'opus_high', 'to': 'astra_high'}), self.events(tid))
 
     def test_bounded_and_routine_can_go_to_opus(self):
         t = self.run_tier('routine', {'routine': 'opus_medium', 'bounded': 'opus_medium'})

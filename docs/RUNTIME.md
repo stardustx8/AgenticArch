@@ -25,7 +25,7 @@ aa task "..."  (or the agenticarch skill in Codex desktop)
   -> triage: Codex gpt-6-luna high (read-only, JSON) + SemIf tier vote
        agree / one abstains -> tier;  disagree -> ntfy asks owner (buttons)
   -> checks: .agenticarch.toml [checks] or autodetect + one-time owner OK
-  -> routine: luna_low | bounded: luna_high | medium_tough: decider picks the model (astra_high | opus_high)
+  -> routine, bounded: opus_high (tier_lanes, D028; fails -> astra_high) | medium_tough: decider picks the model (astra_high | opus_high)
      tough (or Pro category): deep case
   -> [opt-in] oracle tests (testable bounded/medium tasks): other-vendor model writes acceptance tests
      (+ an extra set by local Gemma; in races Gemma is the neutral main author),

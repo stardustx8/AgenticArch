@@ -21,8 +21,8 @@ aa doctor
 
 | Work | Worker |
 | --- | --- |
-| Routine | GPT-6 Luna low |
-| Bounded | GPT-6 Luna high |
+| Routine | Claude Opus 5.5 high (D028; failed passes go to GPT-6 Astra high) |
+| Bounded | Claude Opus 5.5 high (D028) |
 | Medium-tough | GPT-6 Astra high or Claude Opus 5.5 medium/high |
 | Tough, architecture, research | GPT-6 Pro web drafts -> Opus 5.5 high x Astra high challenge -> Pro GO + implements |
 

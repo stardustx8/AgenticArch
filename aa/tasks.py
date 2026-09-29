@@ -36,7 +36,7 @@ TIERS = {
 TIER_ORDER = list(TIERS)
 PRO_CATEGORIES = {'architecture', 'research', 'security_design', 'migration_design',
                   'irreversible_change_design'}
-TIER_LANE = {'routine': 'luna_low', 'bounded': 'luna_high'}
+TIER_LANE = {'routine': 'opus_high', 'bounded': 'opus_high'}   # fallback; config tier_lanes (D028)
 MEDIUM_PEERS = tuple(PEER_LANES.values())      # model-only choice: astra_high | opus_high
 
 TRIAGE_SCHEMA = {

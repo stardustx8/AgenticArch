@@ -131,10 +131,11 @@ DEFAULTS: dict[str, Any] = {
         'min_confidence': 0.7,                 # chosen on the dev split (eval/PROBES.md, 2026-09-26)
     },
     'tier_lanes': {
-        # Which worker takes routine and bounded tasks. Owner decision 2026-09-28 (D027): Luna always at high
-        # effort; the published effort curves show low effort is far weaker for a few cents less per task.
-        'routine': 'luna_high',
-        'bounded': 'luna_high',
+        # Which worker takes routine and bounded tasks. Owner decision 2026-09-29 (D028): Claude Opus 5.5 at high
+        # (round C: Opus 23/24 vs Luna 21/24 at the same speed, a third of the Codex tokens). Failed passes go to
+        # the other medium-tough peer (Astra). Luna, if configured here, runs at high effort (D027).
+        'routine': 'opus_high',
+        'bounded': 'opus_high',
     },
     'local_first': {
         # Round B (owner, 2026-09-28): the local Gemma (driven by Codex, no subscription) works first on these
