@@ -216,3 +216,14 @@ Luna): Luna at low effort is far weaker for a few cents less per task. `tier_lan
 stays at medium, where medium and high both scored 40/40 on the review probe (D017). Lab rounds before
 2026-09-28 23:00 used Luna low for routine tasks; comparisons within a round are unaffected.
 
+
+## D028: Claude Opus 5.5 builds routine and bounded tasks; no review by default, added 2026-09-29
+
+Owner decisions after rounds C and D (private results/round-c-r2, round-d-r2):
+- `tier_lanes.routine` and `tier_lanes.bounded` default to `opus_high`. Round C, same 12 practice tasks twice:
+  Opus 23/24 vs Luna 21/24 at the same speed, with a third of Luna's Codex tokens. The cost is Claude
+  subscription quota (about 4 USD API-equivalent per 24 tasks at medium). Failed passes go to the other
+  medium-tough peer (Astra high), then to a deep case. Opus builds at high (D027). Round C measured medium.
+- The review of each delivery (`spec_check`) stays off by default (D024). In round D, both review arms scored
+  20/24 and the same tasks without a review 21/24; the review caught none of the wrong deliveries. It remains
+  opt-in, e.g. for risky areas.
