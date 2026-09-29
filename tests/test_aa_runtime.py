@@ -2097,6 +2097,19 @@ class ConfidenceCheckTests(unittest.TestCase):
         self.assertNotEqual(self.env.db.task(tid)['status'], 'DONE')
 
 
+class LabUsageTests(unittest.TestCase):
+    def test_usage_is_counted_by_the_lanes_cli(self):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from tools.lab import usage_totals
+        calls = [{'lane': 'luna_high', 'usage': {'input_tokens': 10, 'output_tokens': 5, 'cached_input_tokens': 3}},
+                 {'lane': 'opus_medium', 'usage': {'api_equivalent_usd': 0.5}},
+                 {'lane': 'fable_high', 'usage': {'api_equivalent_usd': 1.25}},
+                 {'lane': 'gemma_codex', 'usage': {'total_tokens': 7, 'input_tokens': 99}}]
+        self.assertEqual(usage_totals(calls), {'codex_tokens': 15, 'codex_cached': 3, 'claude_usd_equiv': 1.75,
+                                               'local_tokens': 7})
+
+
 class TierLaneTests(unittest.TestCase):
     """Round C (2026-09-28): routine/bounded worker lanes are configurable (Opus vs Luna)."""
 

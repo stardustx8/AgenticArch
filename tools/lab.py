@@ -52,6 +52,23 @@ class CallLog:
         workers.execute = execute
 
 
+def usage_totals(calls: list[dict]) -> dict:
+    """Subscription use per vendor, by the lane's CLI (a name prefix missed new lanes such as fable_high)."""
+    from aa.workers import LANES, LOCAL_CODEX
+    usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}
+    for c in calls:
+        u = c['usage'] or {}
+        lane = LANES.get(c['lane'])
+        if lane is not None and lane.cli == 'codex' and lane.name not in LOCAL_CODEX:
+            usage['codex_tokens'] += (u.get('input_tokens', 0) or 0) + (u.get('output_tokens', 0) or 0)
+            usage['codex_cached'] += u.get('cached_input_tokens', 0) or 0
+        elif lane is not None and lane.cli == 'claude':
+            usage['claude_usd_equiv'] += u.get('api_equivalent_usd') or 0
+        else:
+            usage['local_tokens'] += u.get('total_tokens', 0) or 0
+    return usage
+
+
 def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int) -> dict:
     from aa import config
     from aa.daemon import App
@@ -126,16 +143,7 @@ def run_task(task_dir: Path, variant: str, flags: dict, timeout_s: int) -> dict:
             (art / 'hidden_output.txt').write_text(h.stdout + h.stderr)
             (art / 'delivered.diff').write_text(sh(repo, 'git', 'diff', 'main', t['branch'] or f'aa/{tid}'))
         d = t['data']
-        usage = {'codex_tokens': 0, 'codex_cached': 0, 'claude_usd_equiv': 0.0, 'local_tokens': 0}
-        for c in log.calls:
-            u = c['usage'] or {}
-            if c['lane'].startswith(('luna', 'astra')):
-                usage['codex_tokens'] += (u.get('input_tokens', 0) or 0) + (u.get('output_tokens', 0) or 0)
-                usage['codex_cached'] += u.get('cached_input_tokens', 0) or 0
-            elif c['lane'].startswith('opus'):
-                usage['claude_usd_equiv'] += u.get('api_equivalent_usd') or 0
-            else:
-                usage['local_tokens'] += u.get('total_tokens', 0) or 0
+        usage = usage_totals(log.calls)
         return {'variant': variant, 'task': meta['id'], 'tier_hint': meta['tier_hint'], 'status': t['status'],
                 'tier': t['tier'], 'lane': t['lane'], 'hidden_pass': hidden, 'all_tests_pass': hidden_all,
                 'seconds': round(time.time() - t0), 'pings': owner_answers, 'passes': t['passes'],
