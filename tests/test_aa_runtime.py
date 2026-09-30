@@ -2110,6 +2110,48 @@ class LabUsageTests(unittest.TestCase):
                                                'local_tokens': 7})
 
 
+class WorkerAssumptionsTests(unittest.TestCase):
+    """ask-r1 (2026-10-01): the builder's guesses where the request was silent reach the owner."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def run_with(self, assumptions):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', {'status': 'done', 'summary': 'implemented', 'open_items': [], 'question': '',
+                                         'rebuttals': [], 'spec_conflicts': [], 'assumptions': assumptions}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work}, FakeCLM('bounded'), triage=False,
+                       spec=False, tier_lanes=None)
+        tid = self.env.app.tasks.create(self.env.target, 'implement transfer')
+        self.env.run(60)
+        return tid
+
+    def test_schema_and_prompt_ask_for_assumptions(self):
+        from aa.tasks import WORKER_SCHEMA
+        self.assertIn('assumptions', WORKER_SCHEMA['required'])
+        self.assertIn('assumptions:', (Path(__file__).resolve().parents[1] / 'aa/prompts/worker.md').read_text())
+
+    def test_assumptions_reach_the_delivery_note_and_the_owner(self):
+        tid = self.run_with(['A repeated idempotency key returns True, like a fresh transfer.'])
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        msg = sh(self.env.target_origin, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
+        self.assertIn('Assumptions (check these):\n- A repeated idempotency key returns True', msg)
+        done = [m for title, m, kw in self.env.sent if title.startswith('Done')]
+        self.assertTrue(done and 'A repeated idempotency key returns True' in done[-1])
+
+    def test_no_assumptions_no_section(self):
+        tid = self.run_with([])
+        msg = sh(self.env.target_origin, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
+        self.assertNotIn('Assumptions', msg)
+
+
 class TierLaneTests(unittest.TestCase):
     """Round C (2026-09-28): routine/bounded worker lanes are configurable (Opus vs Luna)."""
 
