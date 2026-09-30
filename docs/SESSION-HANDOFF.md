@@ -109,6 +109,30 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
     - The trained adapter is not deployed into aa: that needs an owner decision.
 - `aa-gemma` was paused for training (owner approved) and is restarted by the finish script.
 
+## 2026-09-30 and 2026-10-01
+
+- **Merged into `m1-working-runtime`:**
+  - PR #13, D029: an opt-in confidence check after the checks; a low score hands the work to Claude Fable 5.1 high, and
+    a deep case follows if it is still low.
+  - PR #14: the lab counts subscription use by the lane's CLI.
+- **Open:** PR #15 (draft, owner decision). Builders return `assumptions`, and the delivery note and the Done message
+  list them.
+- **CLIs updated:** Codex 0.155.1 to 0.159.2 (GPT-6.1 Sol needs 0.159 or later) and Claude Code 2.1.282 to 2.1.285
+  (Sonnet 5.5). aa's subscription checks pass with both.
+- **Rounds (private repo `results/`):**
+  - round-f-r1: the confidence check with a Fable rework, 24/24 vs 22/24, one task.
+  - round-g-r1: six setups on 8 real Apache Superset fixes.
+  - round-h-r1: GPT-6 Astra, GPT-6.1 Sol and Claude Opus 5.5 alone on 20 Superset fixes: 7/7/5 correct, not
+    distinguishable.
+  - ask-r1: aa asks only when a value is missing outright; its other guesses are invisible to the owner, which is why
+    PR #15 exists.
+- **Strategy after a literature review of about 40 studies:** no more broad rankings of setups. Instead, defaults based
+  on the literature, a small regression suite, and workflow tests.
+- **Lab tools (private repo `research/harness-opt-01/lab-tools/`):**
+  - `labkit.py`: step checkpoints.
+  - `lab.py`: start, pause and resume; `lab-resume.service` restarts runs after a reboot.
+  - `regress.py` with `regression-suite.json`: 13 discriminating tasks.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).
