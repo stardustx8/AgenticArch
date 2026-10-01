@@ -239,3 +239,22 @@ lane (`fable_high`, Claude Fable 5.1 high) takes over the same worktree with the
 `max_reworks`), and the checks and the confidence check run again. Still below the threshold after that, the task
 opens a deep case (GPT-6 Pro / the owner). The owner proposed this chain; round F measures it live before it can
 become a default. The delivery note states the last check's probability.
+
+## D030: builders state their assumptions; the owner sees them, added 2026-10-01
+
+Every builder answer has an `assumptions` list: choices made where the request, the code and the tests were silent. aa
+keeps them per lane and lists those of the delivered lane in the delivery commit and the ntfy Done message, under
+"Assumptions (check these)".
+- **Why:** in private results/ask-r1, aa asked the owner only when a value was missing outright and guessed otherwise
+  (8 of 10 right). The wrong guess was invisible. With this change, both runs of that task named the decisive guess.
+- **Regression check:** practice suite, 20 runs, 15 correct; every task at its usual rate.
+- Owner decision, 2026-10-01.
+
+## D031: builder choice for medium-tough work stays; no GPT-6.1 Sol lane, added 2026-10-01
+
+On 20 real Apache Superset fixes (private results/round-h-r1), GPT-6 Astra, GPT-6.1 Sol and Claude Opus 5.5 working
+alone were not distinguishable in correctness: 7, 7 and 5 of 20; paired differences within about ±0.2, p between 0.6
+and 1.0. Astra was the fastest. Sol matched Astra's outcomes with 65% more tokens and 1.7× the time.
+- The decider keeps choosing between Astra and Opus for medium-tough tasks.
+- No Sol lane is added.
+- Owner decision, 2026-10-01.
