@@ -30,4 +30,7 @@ Your final answer is the JSON object required by the output schema:
   lines that already satisfy it (empty otherwise).
 - spec_conflicts: contradictions you found between the request, the repository's documentation
   and the tests (empty if none).
+- assumptions: choices you made where the request, the code and the tests were silent or ambiguous
+  (for example a return value, a boundary, a default), one sentence each, so the owner can check them
+  (empty if none).
 $owner_answers

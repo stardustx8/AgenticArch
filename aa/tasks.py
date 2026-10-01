@@ -60,9 +60,10 @@ ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 
 
 WORKER_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['status', 'summary', 'open_items', 'question', 'rebuttals', 'spec_conflicts'],
+    'required': ['status', 'summary', 'open_items', 'question', 'rebuttals', 'spec_conflicts', 'assumptions'],
     'properties': {
         'spec_conflicts': {'type': 'array', 'items': {'type': 'string'}},
+        'assumptions': {'type': 'array', 'items': {'type': 'string'}},
         'status': {'type': 'string', 'enum': ['done', 'partial', 'blocked']},
         'summary': {'type': 'string'},
         'open_items': {'type': 'array', 'items': {'type': 'string'}},
@@ -104,13 +105,14 @@ def worker_report(res) -> dict:
         return {'status': s['status'], 'summary': str(s.get('summary', '')),
                 'open_items': [str(x) for x in s.get('open_items') or []],
                 'question': str(s.get('question', '')), 'rebuttals': [str(x) for x in s.get('rebuttals') or []],
-                'spec_conflicts': [str(x) for x in s.get('spec_conflicts') or []], 'from_schema': True}
+                'spec_conflicts': [str(x) for x in s.get('spec_conflicts') or []],
+                'assumptions': [str(x) for x in s.get('assumptions') or []], 'from_schema': True}
     lines = res.text.splitlines()
     blocked = next((ln for ln in lines if ln.startswith('BLOCKED:')), None)
     return {'status': 'blocked' if blocked else 'done', 'summary': res.text,
             'open_items': [], 'question': blocked[len('BLOCKED:'):].strip() if blocked else '',
             'rebuttals': [ln.strip() for ln in lines if ln.strip().startswith('REBUTTAL:')],
-            'spec_conflicts': [], 'from_schema': False}
+            'spec_conflicts': [], 'assumptions': [], 'from_schema': False}
 
 
 def render(name: str, **values: object) -> str:
@@ -376,6 +378,8 @@ class TaskFlow(QualityMixin):
         t['data'].setdefault('attempts', []).append(
             {'lane': lane.name, 'ok': res.ok, 'seconds': round(res.seconds), 'usage': res.usage,
              'error': res.error[:500], 'status': report['status'], 'summary': report['summary'][-1500:]})
+        # ask-r1 (2026-10-01): guesses where the request was silent reach the owner in the delivery note.
+        t['data'].setdefault('assumptions', {})[lane.name] = report['assumptions'][:10]
         if report['rebuttals']:
             t['data']['rebuttals'] = report['rebuttals'][:10]
         if report['spec_conflicts']:
@@ -764,6 +768,9 @@ class TaskFlow(QualityMixin):
             spec_note += f'\nConfidence check: {conf[-1]["probability"]:.0%} by {conf[-1]["judge"]}' + (
                 f' (after a rework; the first attempt got {t["data"]["confidence_checks"][0]["probability"]:.0%})'
                 if t['data'].get('confidence_reworks') else '')
+        assumed = (t['data'].get('assumptions') or {}).get(t['lane']) or []
+        if assumed:
+            spec_note += '\nAssumptions (check these):\n' + '\n'.join(f'- {a}' for a in assumed)
         sha = git.commit_all(wt, f'aa: {title}\n\nTask {t["id"]} via {t["lane"]}.\n'
                                  f'Checks:\n{t["data"].get("checks_result", "")}\n{spec_note}')
         stat = git.diffstat(wt, t['base_ref'])
