@@ -115,8 +115,8 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   - PR #13, D029: an opt-in confidence check after the checks; a low score hands the work to Claude Fable 5.1 high, and
     a deep case follows if it is still low.
   - PR #14: the lab counts subscription use by the lane's CLI.
-- **Open:** PR #15 (draft, owner decision). Builders return `assumptions`, and the delivery note and the Done message
-  list them.
+- **Merged later (2026-10-01):** PR #15, D030. Builders return `assumptions`, and the delivery note and the Done
+  message list them.
 - **CLIs updated:** Codex 0.155.1 to 0.159.2 (GPT-6.1 Sol needs 0.159 or later) and Claude Code 2.1.282 to 2.1.285
   (Sonnet 5.5). aa's subscription checks pass with both.
 - **Rounds (private repo `results/`):**
@@ -133,14 +133,34 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   - `lab.py`: start, pause and resume; `lab-resume.service` restarts runs after a reboot.
   - `regress.py` with `regression-suite.json`: 13 discriminating tasks.
 
+## 2026-10-02
+
+- **Decisions:**
+  - D031: no Sol lane; the decider keeps Astra and Opus.
+  - D032 (PR #16): a research phase is offered once per new repository (young AND small) before the first build.
+    - The owner replies `research <id>` or `noresearch <id>`.
+    - The research call alone may use web search and fetch.
+- **Dropped by the owner:** prompt rewriting; a Codex fork; a separate private Codex installation and
+  local prose models as harness parts.
+- **Lab: Claude Code workflows (private repo `results/workflow-g6-r2`).**
+  - Headless limit: `claude -p` waits at most 10 minutes for background work, such as a workflow, after the main
+    agent's turn. Then it forces the final answer and the workflow is cut off.
+  - Fix: set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` and tell the main agent to end its turn and wait. Verified with
+    a 12-minute test.
+  - With that fix, a workflow of Opus 5.5 agents on the 6 Superset fixes no single builder solved: 0/6 correct.
+    - 38% of required tests vs 32% for Opus alone.
+    - About 3.4x the cost and 2.7x the time.
+  - Workflows are not added to aa.
+- **Lab: SemIf file hints (private repo `results/semif-hints-r1`).** Training with a "none of these files" option,
+  shaped like the hint tournament. Running; not deployed.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).
 2. First real deep case against a GitHub target repo (owner pastes the Pro prompts).
 3. Install skills on the Mac (`tools/install_skills.py`).
 4. Optional owner actions: `sudo efibootmgr -o 0002,0000` (boot Linux by default; firmware
-   currently boots Windows first), `sudo loginctl enable-linger rosh` (units without login),
-   `sudo apt install ipmitool` (fan readings via the BMC).
+   currently boots Windows first), `sudo apt install ipmitool` (fan readings via the BMC). Linger is already on.
 
 ## Sandbox
 
