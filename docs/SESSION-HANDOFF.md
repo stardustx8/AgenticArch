@@ -149,7 +149,8 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
     agent's turn. Then it forces the final answer and the workflow is cut off.
   - Fix: set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` and tell the main agent to end its turn and wait. Verified with
     a 12-minute test.
-  - With that fix, a workflow of Opus 5.5 agents on the 6 Superset fixes no single builder solved: 0/6 correct.
+  - With that fix, a workflow of Opus 5.5 agents on 6 of the 12 Superset fixes no single builder solved: 0/6
+    strict, 1/6 under the round's preregistered test exclusions (corrected after GPT-6 Pro's turn 05 review).
     - 38% of required tests vs 32% for Opus alone.
     - About 3.4x the cost and 2.7x the time.
   - Workflows are not added to aa.
