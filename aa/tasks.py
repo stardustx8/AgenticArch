@@ -185,10 +185,12 @@ class TaskFlow(QualityMixin):
         return True
 
     def start_research(self, tid: str) -> None:
+        """The owner asks for research: on a pending offer, or on any task that has not reached a builder yet (D033)."""
         t = self.db.task(tid)
-        if not t or (t['data'].get('research') or {}).get('state') != 'offered':
-            raise ValueError('task has no pending research offer')
-        t['data']['research']['state'] = 'running'
+        state = (t['data'].get('research') or {}).get('state') if t else None
+        if not t or not (state == 'offered' or (state in (None, 'skipped') and t['status'] in ('NEW', 'TRIAGED'))):
+            raise ValueError('research can be requested only before the build starts')
+        t['data']['research'] = {**(t['data'].get('research') or {}), 'state': 'running'}
         self.db.update_task(tid, status='RESEARCH', data=t['data'])
 
     def skip_research(self, tid: str) -> None:
@@ -225,6 +227,10 @@ class TaskFlow(QualityMixin):
                 'authoritative):\n<<<\n' + r['brief'][:6000] + '\n>>>\n')
 
     def _triage(self, t: dict) -> None:
+        if (t['data'].get('research') or {}).get('state') == 'requested':      # `aa task --research` (D033)
+            t['data']['research']['state'] = 'running'
+            self.db.update_task(t['id'], status='RESEARCH', data=t['data'])
+            return
         if self._offer_research(t):
             return
         repo = Path(t['repo'])

@@ -275,3 +275,18 @@ sources it actually opened. The brief:
 
 Live check: a toy rate-limiter project got a brief with 21 sources in 170 s, for about $1.20 API-equivalent. Switch:
 `research_phase.offer`.
+
+## D033: research only on the owner's request, added 2026-10-02 (amends D032)
+
+Owner decision (2026-10-02): research can be needed in older and larger projects too, so the owner decides when to
+research rather than aa guessing from the repository's age and size.
+
+- The automatic offer for new projects is off by default (`research_phase.offer = false`). The D032 offer still
+  works if it is switched on.
+- The owner asks for research in either of two ways:
+  - when creating the task: `aa task --research "..."`;
+  - on a task that has not reached a builder yet (status NEW or TRIAGED, or a pending offer): the reply
+    `research <id>`.
+- Later, the reply is refused with a "Reply not applied" ping.
+- The research call itself is unchanged from D032: Opus with web search writes a sourced brief for the owner and the
+  builder, and the request stays authoritative.

@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('prompt', nargs='+')
     p.add_argument('--repo', default='.')
     p.add_argument('--tier', choices=['routine', 'bounded', 'medium_tough', 'tough'])
+    p.add_argument('--research', action='store_true', help='run a research phase (web, sourced brief) before the build')
     p = sub.add_parser('status')
     p.add_argument('-a', '--all', action='store_true')
     sub.add_parser('show').add_argument('id')
@@ -53,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         repo = Path(a.repo).expanduser().resolve()
         tid = db.create_task(str(git.toplevel(repo)), ' '.join(a.prompt), a.tier)
         db.update_task(tid, base_ref=git.head(repo))
+        if a.research:
+            db.update_task(tid, data={'research': {'state': 'requested'}})
         assert a.tier is None or a.tier in TIERS
         print(tid)
         return 0

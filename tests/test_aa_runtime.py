@@ -2240,6 +2240,68 @@ class ResearchPhaseTests(unittest.TestCase):
         self.assertFalse(any('research' in title.lower() for title, m, kw in self.env.sent))
 
 
+class ResearchOnRequestTests(unittest.TestCase):
+    """D033 (owner, 2026-10-02): the owner decides on research; no automatic offer by default."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.prompts, self.research_calls = [], 0
+
+    def tearDown(self):
+        self.env.close()
+        self._tmp.cleanup()
+
+    def make(self):
+        def work(lane, cwd, prompt, extra):
+            self.prompts.append(prompt); (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+
+        def research_fn(lane, cwd, prompt, extra):
+            self.research_calls += 1
+            return Result(True, '', {'brief': '## Summary\nUse the leaky bucket (Doe 2024).',
+                                     'sources': [{'title': 'Leaky', 'url': 'https://example.org/lb', 'supports': 'design'}],
+                                     'open_questions': []}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work, 'research': research_fn}, FakeCLM('bounded'),
+                       triage=False, spec=False, tier_lanes=None)
+        return self.env.app.tasks.create(self.env.target, 'add rate limiting to the API')
+
+    def test_default_config_does_not_offer(self):
+        self.assertFalse(config.DEFAULTS['research_phase']['offer'])
+        tid = self.make()
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertEqual(self.research_calls, 0)
+        self.assertFalse(any('research' in title.lower() for title, m, kw in self.env.sent))
+
+    def test_requested_at_creation_runs_before_the_build(self):
+        tid = self.make()
+        self.env.db.update_task(tid, data={'research': {'state': 'requested'}})     # what `aa task --research` stores
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertEqual(self.research_calls, 1)
+        self.assertIn('leaky bucket', self.prompts[0])
+        self.assertTrue(any(title.startswith('Research brief') for title, m, kw in self.env.sent))
+
+    def test_reply_before_the_build_starts_research(self):
+        tid = self.make()
+        self.env.db.inbox_put(f'research {tid}')
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertEqual(self.research_calls, 1)
+        self.assertIn('leaky bucket', self.prompts[0])
+
+    def test_reply_after_the_build_is_refused(self):
+        tid = self.make()
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.env.db.inbox_put(f'research {tid}')
+        self.env.run(5)
+        self.assertEqual(self.research_calls, 0)
+        self.assertTrue(any(title == 'Reply not applied' for title, m, kw in self.env.sent))
+
+
 class TierLaneTests(unittest.TestCase):
     """Round C (2026-09-28): routine/bounded worker lanes are configurable (Opus vs Luna)."""
 
