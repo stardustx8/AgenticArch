@@ -1,0 +1,5 @@
+{
+ "id": "b3_path_parent_segments",
+ "tier_hint": "medium_tough",
+ "prompt": "relative_to('../shared/x', 'app') returns '../shared/x', but the right answer is '../../shared/x'. Anything involving '..' seems off, so please fix it properly. normalize() must keep leading '..' segments of relative paths that can't be collapsed (e.g. 'a/../../b' -> '../b'), while for absolute paths '/..' is still '/'. relative_to() should raise ValueError when mixing absolute and relative paths, or when the answer can't be known from the strings alone (like relative_to('a', '..'))."
+}

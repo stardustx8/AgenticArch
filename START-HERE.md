@@ -1,9 +1,9 @@
 # Resume AgenticArch
 
-`main` is the shared integration baseline. Start from the actual remote revision, not an older ZIP or a remembered chat. Read `AGENTS.md`, `docs/SESSION-HANDOFF.md`, `docs/OWNER-REQUIREMENTS.md`, `IMPLEMENTATION-STATUS.md` and `config/model-routing.json`, then the files relevant to the task.
+1. Read [SESSION-HANDOFF](docs/SESSION-HANDOFF.md), [OWNER-REQUIREMENTS](docs/OWNER-REQUIREMENTS.md) and [RUNTIME](docs/RUNTIME.md).
+2. On the workstation run `aa doctor` and `aa status -a`; check `git status` and the remote head.
+3. Run `python3 -m unittest discover -s tests` and `python3 tools/check_kit.py` before and after changes.
+4. Work on a branch, open a PR per milestone; never force-push over other work.
+5. At closeout update SESSION-HANDOFF, IMPLEMENTATION-STATUS and DECISIONS with what actually ran.
 
-Inspect the local worktree and remote head before editing. Preserve existing work. Use separate worktrees/branches for simultaneous edits and ordinary integration commits; never force-push to erase another session. Both harness variants are maintained together under `harnesses/`.
-
-The initial workstation task is private, read-only capability discovery. Then follow [the implementation entry point](prompts/IMPLEMENT-AGENTICARCH.md). Run offline tests before and after changes. A passing mock does not establish a working provider or actual quota savings.
-
-At closeout, update the handoff, implementation status and durable decisions. Record exact commands/results, live versus fixture evidence, remaining gates and next action. Read back the published commit. Never publish credentials, private model sessions, real review bundles or unrelated customer context.
+Never commit credentials, case content, private chat links or customer data; cases belong in the private case repo.

@@ -1,0 +1,5 @@
+{
+ "id": "b3_allocate_remainder",
+ "tier_hint": "medium_tough",
+ "prompt": "allocate() puts every leftover cent on the last person. 100 cents over [1, 1, 1] gives [33, 33, 34], and a zero-weight last person can end up paying. Switch it to largest remainder: floor each exact share, then give out the leftover cents one at a time by largest fractional remainder, with earlier entries winning ties. Refunds (negative totals) should mirror charges exactly, and negative weights are an error. Also add an optional unit= (e.g. 5 for cash) so every share is a multiple of it, with a ValueError if the total isn't a multiple, and have split_invoice pass it through."
+}

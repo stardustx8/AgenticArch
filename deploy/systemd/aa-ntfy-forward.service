@@ -1,0 +1,11 @@
+[Unit]
+Description=AgenticArch: expose loopback ntfy (127.0.0.1:8093) on the Tailscale IP
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/dev/AgenticArch/deploy/bin/tcp_forward.py --listen-tailscale --port 8093 --target 127.0.0.1:8093
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

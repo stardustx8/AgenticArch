@@ -1,0 +1,6 @@
+{
+ "id": "b43_multi_window_quotas",
+ "tier_hint": "medium_tough",
+ "prompt": "Tiers in `throttle/quotas.py` can only hold a single window, but we need limits like 2 per second AND 100 per minute. Let tiers and per-user overrides declare several named windows (an override replaces the tier window with the same name and adds any new ones), and make `RateLimiter` allow a request only when every window has room for its full cost; a denied request must not be recorded in any window. For denials, `retry_after` should be how long until the whole cost would fit in all windows (costs are weighted, so waiting for the oldest event alone is often not enough), or `None` if the cost exceeds some window's limit; `remaining` is the smallest headroom across windows. Also, we've seen check() keep counting an event one tick too long: an event at t must stop counting at exactly t + window seconds.",
+ "trap": "defect_twins"
+}

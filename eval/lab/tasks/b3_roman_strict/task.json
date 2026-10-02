@@ -1,0 +1,5 @@
+{
+ "id": "b3_roman_strict",
+ "tier_hint": "bounded",
+ "prompt": "page_index('iiii', 10) returns 4, and page_index('ic', 200) returns 99. The roman parser accepts anything that adds up. Make from_roman strict: accept only canonical numerals (exactly what to_roman would produce, case-insensitive). Raise ValueError for everything else, including the empty string."
+}

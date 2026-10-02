@@ -18,7 +18,7 @@ import stat
 import tempfile
 import uuid
 
-NAMES = ('prepare-sol-pro-architecture-review', 'fable-adversarial-review')
+NAMES = ('agenticarch', 'prepare-sol-pro-architecture-review', 'fable-adversarial-review')
 ROOT = Path(__file__).resolve().parents[1]
 
 

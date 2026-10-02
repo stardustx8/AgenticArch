@@ -1,0 +1,5 @@
+{
+ "id": "b3_semver_precedence",
+ "tier_hint": "bounded",
+ "prompt": "sort_versions is ordering release candidates wrong. '2.0.0-rc.10' sorts before '2.0.0-rc.2', and a final '2.0.0' sorts before its own prereleases, so latest(..., include_prerelease=True) picks the rc. Please make Version comparisons follow SemVer 2.0.0 precedence properly. Build metadata doesn't affect ordering."
+}

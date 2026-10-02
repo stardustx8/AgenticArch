@@ -1,0 +1,5 @@
+{
+ "id": "b2_config_env_overrides",
+ "tier_hint": "bounded",
+ "prompt": "Add environment-variable overrides to `load_config`: any `APP_`-prefixed variable maps onto an existing leaf key, with `__` separating nesting levels (`APP_DB__PORT=5433` -> `config[\"db\"][\"port\"]`, `APP_LOG_LEVEL` -> `config[\"log_level\"]`), matched case-insensitively; variables that don't match a leaf key are ignored. Coerce the string to the type of the value it replaces (int, float, bool accepting true/false/yes/no/1/0 in any case, otherwise str) and raise `ConfigError` naming the variable if that fails. Env wins over the JSON text, which wins over defaults. Take the environment as an optional `env` mapping argument defaulting to `os.environ`."
+}

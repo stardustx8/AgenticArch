@@ -1,0 +1,5 @@
+{
+ "id": "b1_date_formats",
+ "tier_hint": "bounded",
+ "prompt": "Partner import files don't all use ISO dates: the EU feeds send `31/12/2024` or `31.12.2024` (always day first) and the US system sends `Dec 31, 2024` or `December 31, 2024`. Extend parse_date to accept those as well as ISO, ignoring surrounding whitespace. Anything else \u2014 including impossible dates like 31/02/2024 \u2014 should raise ValueError."
+}

@@ -1,0 +1,6 @@
+{
+ "id": "b42_template_loops_escaping",
+ "tier_hint": "medium_tough",
+ "prompt": "Our template engine's `{% for %}` needs the usual loop helpers \u2014 `loop.index` (1-based), `loop.index0`, `loop.first`, `loop.last`, `loop.length` \u2014 plus an optional `{% else %}` branch inside the for block that renders when there is nothing to iterate. Templates get fed generators too, so don't rely on the sequence having a len(). While you're in there: right now the loop variable leaks out after `{% endfor %}` and clobbers any outer variable with the same name; loop names (including `loop`) should only exist inside the loop body. Separately, our HTML escaping ignores quotes, which breaks attribute values \u2014 `\"` must become `&quot;` and `'` must become `&#39;` everywhere we escape.",
+ "trap": "defect_twins"
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=AgenticArch local model: Gemma 4 31B (vLLM, FP8, loopback) — neutral judge + test writer
+After=network.target
+
+[Service]
+Environment=HF_HUB_OFFLINE=1
+Environment=VLLM_NO_USAGE_STATS=1
+# FlashInfer would JIT-compile its sampler (needs nvcc, not installed); use the PyTorch sampler.
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+ExecStart=%h/.local/share/agenticarch/clm-venv/bin/vllm serve %h/.local/share/agenticarch/models/gemma-4-31B-it --served-model-name gemma-4-31b --host 127.0.0.1 --port 8100 --quantization fp8 --max-model-len 32768 --max-num-seqs 4 --gpu-memory-utilization 0.55 --structured-outputs-config '{"backend": "xgrammar", "disable_any_whitespace": true}'
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

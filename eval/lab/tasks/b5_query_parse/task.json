@@ -1,0 +1,6 @@
+{
+ "id": "b5_query_parse",
+ "tier_hint": "medium_tough",
+ "prompt": "urlkit can build query strings but can't read them back. Add parse_query(qs), the inverse of build_query: a key that appears once maps to its string value, and a key that appears several times maps to a list of its values in order. parse_query(build_query(p)) should give p back for dicts of strings / lists of 2+ strings, and a leading '?' should be ignored. Export it from the package.",
+ "trap": "data_loss"
+}

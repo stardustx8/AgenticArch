@@ -25,7 +25,7 @@ class InstallerTests(unittest.TestCase):
     def test_dry_run_creates_nothing(self):
         report = module.install(self.source, self.target)
         self.assertEqual(report['mode'], 'DRY_RUN')
-        self.assertEqual(len(report['changes']), 2)
+        self.assertEqual(len(report['changes']), len(module.NAMES))
         self.assertFalse(self.target.exists())
 
     def test_apply_preserves_helpers_and_backs_up_originals(self):

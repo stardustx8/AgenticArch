@@ -1,0 +1,5 @@
+{
+ "id": "b1_fx_rate_fallback",
+ "tier_hint": "medium_tough",
+ "prompt": "Finance flagged a few problems with FX conversion in fxledger: (1) a rate is only found if there's an entry for that exact day \u2014 on weekends/holidays fall back to the most recent earlier rate (never a later one); (2) we often only have the opposite pair (USD\u2192EUR when we need EUR\u2192USD), so use the inverse when the direct pair isn't available; (3) converted amounts must be rounded half-up to the target currency's minor units (JPY has none, KWD has 3, most have 2). ledger_total should round each converted entry before summing. Keep raising KeyError when there's no usable rate at all."
+}

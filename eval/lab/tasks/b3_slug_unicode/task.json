@@ -1,0 +1,5 @@
+{
+ "id": "b3_slug_unicode",
+ "tier_hint": "bounded",
+ "prompt": "slugify mangles non-English titles: 'Cr\u00e8me Br\u00fbl\u00e9e' comes out as 'cr-me-br-l-e'. Transliterate accented letters to plain ASCII and drop anything that can't be transliterated. Also add an optional max_length to slugify and unique_slug. It should cut on a word boundary with no trailing hyphen, and hard-cut only when the first word alone is too long. For unique_slug, the -2/-3 suffix has to fit within the limit too."
+}
