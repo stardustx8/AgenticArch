@@ -147,7 +147,7 @@ class Workers:
     # -- execution -------------------------------------------------------------
     def execute(self, lane: Lane, prompt: str, cwd: Path, *, write: bool = True,
                 extra_dirs: tuple[Path, ...] = (), schema: dict | None = None,
-                log_name: str = 'job') -> Result:
+                log_name: str = 'job', web: bool = False) -> Result:
         if lane.name not in LOCAL_CODEX:           # the loopback model needs no subscription login
             self.verify_billing(lane.cli)
         self.logs.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ class Workers:
         elif lane.cli == 'local':
             res = self._local(lane, prompt, schema, log)
         else:
-            res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log)
+            res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log, web=web)
         res.seconds = time.time() - t0
         return res
 
@@ -261,7 +261,7 @@ class Workers:
         return Result(ok, text, structured, [self.local['model']] if ok else [], data.get('usage') or {},
                       error='' if ok else 'local model returned no valid output')
 
-    def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
+    def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log, web: bool = False) -> Result:
         # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.
         cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
                '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config']
@@ -276,6 +276,7 @@ class Workers:
                     '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
         else:
             cmd += ['--permission-mode', 'default', '--allowedTools', 'Read', 'Glob', 'Grep',
+                    *(['WebSearch', 'WebFetch'] if web else []),        # research phase: read the web, write nothing
                     '--disallowedTools', 'Edit', 'Write', 'Bash']
         for d in extra_dirs:
             cmd += ['--add-dir', str(d)]

@@ -172,6 +172,16 @@ DEFAULTS: dict[str, Any] = {
         'rework_lane': 'fable_high',
         'max_reworks': 1,
     },
+    'research_phase': {
+        # Owner, 2026-10-02: for a NEW project (a repository with few commits or files), aa first offers a research
+        # phase via ntfy: prior art, papers and methods from the web, as a brief with checked sources. The owner
+        # answers "research <id>" or "noresearch <id>". The brief goes to the owner and into the builder's context;
+        # the request stays authoritative.
+        'offer': True,
+        'lane': 'opus_high',
+        'new_repo_max_commits': 3,
+        'new_repo_max_files': 15,
+    },
     'delivery': {
         'push_branch': True,
     },

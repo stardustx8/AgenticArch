@@ -69,9 +69,10 @@ class FakeWorkers(Workers):
             from aa.workers import BillingError
             raise BillingError('no subscription')
 
-    def execute(self, lane, prompt, cwd, *, write=True, extra_dirs=(), schema=None, log_name='job'):
+    def execute(self, lane, prompt, cwd, *, write=True, extra_dirs=(), schema=None, log_name='job', web=False):
         self.verify_billing(lane.cli)
         self.calls.append((lane.name, log_name))
+        self.web_calls = getattr(self, 'web_calls', []) + ([log_name] if web else [])
         if log_name.endswith('-triage'):
             if self.script['triage'] is None:
                 return Result(False, '', None, [], error='triage timeout')
@@ -116,6 +117,8 @@ def _kind(log_name: str) -> str:
         return 'spec'
     if log_name.endswith('-conf'):
         return 'conf'
+    if log_name.endswith('-research'):
+        return 'research'
     if log_name.endswith('-oracle'):
         return 'oracle'
     if log_name.endswith('-map'):
@@ -154,7 +157,7 @@ LUNA_TIER_LANES = {'routine': 'luna_high', 'bounded': 'luna_high'}
 class Env:
     def __init__(self, tmp: Path, script: dict, clm: FakeCLM, checks='test -f done.txt', policy='codex',
                  triage=True, oracle=False, best_of_2=False, local=False, ideas=None, spec=True,
-                 tier_lanes=LUNA_TIER_LANES, confidence=False):
+                 tier_lanes=LUNA_TIER_LANES, confidence=False, research=False):
         self.tmp = tmp
         # Target repo with a bare origin.
         self.target_origin = tmp / 'target.git'
@@ -176,6 +179,7 @@ class Env:
             'failure_triage': {'enabled': triage},
             'spec_check': {'enabled': spec},     # most flow tests exercise the judge (off by default, D024)
             'confidence_check': {'enabled': confidence},
+            'research_phase': {'offer': research},        # the test repos are tiny "new projects"; most tests skip it
             'oracle_tests': {'enabled': oracle},
             'best_of_2': {'enabled': best_of_2},
             'local_llm': {'enabled': local, 'url': 'http://127.0.0.1:9'},   # never a real server
@@ -2150,6 +2154,90 @@ class WorkerAssumptionsTests(unittest.TestCase):
         tid = self.run_with([])
         msg = sh(self.env.target_origin, 'git', 'log', '-1', '--format=%B', f'aa/{tid}')
         self.assertNotIn('Assumptions', msg)
+
+
+class ResearchPhaseTests(unittest.TestCase):
+    """Owner, 2026-10-02: a new project gets a research offer first; the brief reaches the owner and the builder."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.prompts = []
+
+    def tearDown(self):
+        if hasattr(self, 'env'):
+            self.env.close()
+        self._tmp.cleanup()
+
+    def make(self, research=True):
+        def work(lane, cwd, prompt, extra):
+            self.prompts.append(prompt); (cwd / 'done.txt').write_text('ok')
+            return Result(True, 'done', None, [lane.model])
+
+        def research_fn(lane, cwd, prompt, extra):
+            self.research_prompt = prompt
+            return Result(True, '', {'brief': '## Summary\nUse the token bucket design (Smith 2025).',
+                                     'sources': [{'title': 'Token buckets', 'url': 'https://example.org/tb', 'supports': 'design'}],
+                                     'open_questions': ['Per-user or global limits?']}, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work, 'research': research_fn}, FakeCLM('bounded'),
+                       triage=False, spec=False, tier_lanes=None, research=research)
+        return self.env.app.tasks.create(self.env.target, 'build a rate limiter service')
+
+    def test_new_project_gets_one_offer_with_buttons(self):
+        tid = self.make()
+        self.env.run(5)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'WAIT_OWNER')
+        title, msg, kw = self.env.sent[-1]
+        self.assertIn('research first', title.lower())
+        self.assertIn(('Research first', f'research {tid}'), kw['choices'])
+        self.assertIn(('Skip', f'noresearch {tid}'), kw['choices'])
+
+    def test_research_brief_reaches_owner_and_builder(self):
+        tid = self.make()
+        self.env.run(5)
+        self.env.db.inbox_put(f'research {tid}')
+        self.env.run(60)
+        t = self.env.db.task(tid)
+        self.assertEqual(t['status'], 'DONE')
+        self.assertIn('build a rate limiter service', self.research_prompt)
+        self.assertTrue(any(n.endswith('-research') for n in self.env.workers.web_calls))   # the web is allowed there only
+        self.assertTrue(any('token bucket' in m for title, m, kw in self.env.sent if title.startswith('Research brief')))
+        self.assertIn('token bucket design', self.prompts[0])                  # context for the builder
+        self.assertIn('request above stays authoritative', self.prompts[0])
+        self.assertTrue(Path(t['data']['research']['file']).read_text().count('https://example.org/tb'))
+
+    def test_skip_goes_straight_on_and_is_not_offered_again(self):
+        tid = self.make()
+        self.env.run(5)
+        self.env.db.inbox_put(f'noresearch {tid}')
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertNotIn('research brief', ' '.join(self.prompts).lower())
+        tid2 = self.env.app.tasks.create(self.env.target, 'second task in the same young repo')
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid2)['status'], 'DONE')              # once per repository
+
+    def test_established_repo_gets_no_offer(self):
+        def work(lane, cwd, prompt, extra):
+            (cwd / 'done.txt').write_text('ok'); return Result(True, 'done', None, [lane.model])
+        self.env = Env(self.tmp, {'triage': triage('bounded'), 'work': work}, FakeCLM('bounded'), triage=False, spec=False,
+                       tier_lanes=None, research=True)
+        for i in range(5):                                   # an established project: history and files
+            for j in range(4):
+                (self.env.target / f'mod_{i}_{j}.py').write_text(f'x = {i}{j}\n')
+            sh(self.env.target, 'git', 'add', '-A')
+            sh(self.env.target, 'git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', f'c{i}')
+        tid = self.env.app.tasks.create(self.env.target, 'small fix')
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertFalse(any('research' in title.lower() for title, m, kw in self.env.sent))
+
+    def test_established_repo_and_switch_off_are_not_offered(self):
+        tid = self.make(research=False)
+        self.env.run(60)
+        self.assertEqual(self.env.db.task(tid)['status'], 'DONE')
+        self.assertFalse(any('research' in title.lower() for title, m, kw in self.env.sent))
 
 
 class TierLaneTests(unittest.TestCase):
