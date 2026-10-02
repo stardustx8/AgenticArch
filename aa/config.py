@@ -173,11 +173,12 @@ DEFAULTS: dict[str, Any] = {
         'max_reworks': 1,
     },
     'research_phase': {
-        # Owner, 2026-10-02: for a NEW project (at most 3 commits and at most 40 files), aa first offers a research
-        # phase via ntfy: prior art, papers and methods from the web, as a brief with checked sources. The owner
-        # answers "research <id>" or "noresearch <id>". The brief goes to the owner and into the builder's context;
-        # the request stays authoritative.
-        'offer': True,
+        # A research phase: prior art, papers and methods from the web, as a brief with checked sources. The brief goes
+        # to the owner and into the builder's context; the request stays authoritative.
+        # D033 (owner, 2026-10-02): the owner decides. Ask for it with `aa task --research ...` or the reply
+        # "research <id>" before the build starts. The automatic offer for new projects (D032) is off; with
+        # offer: true, a young AND small repository (limits below) gets one ntfy offer.
+        'offer': False,
         'lane': 'opus_high',
         'new_repo_max_commits': 3,
         'new_repo_max_files': 40,

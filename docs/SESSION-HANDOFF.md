@@ -140,6 +140,8 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
   - D032 (PR #16): a research phase is offered once per new repository (young AND small) before the first build.
     - The owner replies `research <id>` or `noresearch <id>`.
     - The research call alone may use web search and fetch.
+  - D033 (same day, amends D032): the owner decides on research. Use `aa task --research` or the reply
+    `research <id>` before the build starts; the automatic offer is off by default.
 - **Dropped by the owner:** prompt rewriting; a Codex fork; a separate private Codex installation and
   local prose models as harness parts.
 - **Lab: Claude Code workflows (private repo `results/workflow-g6-r2`).**
