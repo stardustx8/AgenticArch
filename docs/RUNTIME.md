@@ -22,7 +22,7 @@ Workers are the owner's subscription CLIs: `~/.local/bin/codex` (ChatGPT login) 
 Default since D024: the simple pipeline. Stages marked [opt-in] are off unless enabled in aa.toml.
 [experimental, D025] local_first: configured tiers start on local Gemma via Codex; independent review, then accept or escalate.
 aa task "..."  (or the agenticarch skill in Codex desktop)
-  -> new project (few commits or files)? ntfy offers a research phase first (D032): Opus with web search
+  -> new project (<= 3 commits and <= 40 files)? ntfy offers a research phase first (D032): Opus with web search
      writes a sourced brief for the owner and the builder
   -> triage: Codex gpt-6-luna high (read-only, JSON) + SemIf tier vote
        agree / one abstains -> tier;  disagree -> ntfy asks owner (buttons)

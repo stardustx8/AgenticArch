@@ -163,7 +163,8 @@ class TaskFlow(QualityMixin):
         rc = self.cfg['research_phase']
         commits = int(git.git(repo, 'rev-list', '--count', 'HEAD', check=False).strip() or 0)
         files = [f for f in git.git(repo, 'ls-files', check=False).splitlines() if f.strip()]
-        return commits <= int(rc['new_repo_max_commits']) or len(files) <= int(rc['new_repo_max_files'])
+        # young AND small: a fresh or freshly scaffolded project, not a small long-lived repository
+        return commits <= int(rc['new_repo_max_commits']) and len(files) <= int(rc['new_repo_max_files'])
 
     def _offer_research(self, t: dict) -> bool:
         """New project: ask the owner once whether to run a research phase first. True = waiting for the answer."""

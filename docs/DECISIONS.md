@@ -262,7 +262,8 @@ and 1.0. Astra was the fastest. Sol matched Astra's outcomes with 65% more token
 ## D032: research phase offered for new projects, added 2026-10-02
 
 Owner decision (2026-10-02): for a new project, aa first offers a research phase. "New" means a repository with at most
-`new_repo_max_commits` (3) commits or at most `new_repo_max_files` (15) files. The offer is one ntfy question with the
+`new_repo_max_commits` (3) commits and at most `new_repo_max_files` (40) files, i.e. young and small, not a small
+long-lived repository. The offer is one ntfy question with the
 buttons "Research first" (`research <id>`) and "Skip" (`noresearch <id>`), and it comes at most once per repository.
 
 On "Research first", a read-only Claude call (`research_phase.lane`, Opus 5.5 high) may use WebSearch and WebFetch and
