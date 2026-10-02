@@ -96,6 +96,10 @@ class App:
                 self.tasks.accept_spec(ident)
             elif verb == 'code':
                 self.tasks.env_as_code(ident)
+            elif verb == 'research':
+                self.tasks.start_research(ident)
+            elif verb == 'noresearch':
+                self.tasks.skip_research(ident)
             else:
                 self.db.event('reply_ignored', line=line)
                 return

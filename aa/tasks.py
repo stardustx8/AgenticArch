@@ -56,7 +56,7 @@ TRIAGE_SCHEMA = {
     },
 }
 
-ACTIVE = ('NEW', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 'CONFIDENCE', 'DELIVER')
+ACTIVE = ('NEW', 'RESEARCH', 'TRIAGED', 'ORACLE', 'MAP', 'RACE', 'READY', 'VERIFY', 'SPEC', 'CONFIDENCE', 'DELIVER')
 
 WORKER_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -83,6 +83,15 @@ SPEC_SCHEMA = {
         'tampering': {'type': 'boolean'},
         'tampering_reason': {'type': 'string'},
     },
+}
+
+RESEARCH_SCHEMA = {
+    'type': 'object', 'additionalProperties': False, 'required': ['brief', 'sources', 'open_questions'],
+    'properties': {'brief': {'type': 'string'},
+                   'sources': {'type': 'array', 'items': {
+                       'type': 'object', 'additionalProperties': False, 'required': ['title', 'url', 'supports'],
+                       'properties': {'title': {'type': 'string'}, 'url': {'type': 'string'}, 'supports': {'type': 'string'}}}},
+                   'open_questions': {'type': 'array', 'items': {'type': 'string'}}},
 }
 
 CONFIDENCE_SCHEMA = {    # identical to the lab's confidence-r1/r2 answer format
@@ -141,6 +150,7 @@ class TaskFlow(QualityMixin):
     def step(self, t: dict) -> None:
         handler = {'NEW': self._triage, 'TRIAGED': self._route, 'ORACLE': self._oracle, 'RACE': self._race,
                    'MAP': self._map,
+                   'RESEARCH': self._research,
                    'READY': self._work,
                    'VERIFY': self._verify, 'SPEC': self._spec_check, 'CONFIDENCE': self._confidence_check,
                    'DELIVER': self._deliver}.get(t['status'])
@@ -148,7 +158,75 @@ class TaskFlow(QualityMixin):
             handler(t)
 
     # ------------------------------------------------------------------ triage
+    # ---------------------------------------------------------------- research
+    def _looks_new(self, repo: Path) -> bool:
+        rc = self.cfg['research_phase']
+        commits = int(git.git(repo, 'rev-list', '--count', 'HEAD', check=False).strip() or 0)
+        files = [f for f in git.git(repo, 'ls-files', check=False).splitlines() if f.strip()]
+        # young AND small: a fresh or freshly scaffolded project, not a small long-lived repository
+        return commits <= int(rc['new_repo_max_commits']) and len(files) <= int(rc['new_repo_max_files'])
+
+    def _offer_research(self, t: dict) -> bool:
+        """New project: ask the owner once whether to run a research phase first. True = waiting for the answer."""
+        rc = self.cfg['research_phase']
+        if not rc.get('offer') or 'research' in t['data'] or not self._looks_new(Path(t['repo'])):
+            return False
+        for row in self.db.q('SELECT data FROM tasks WHERE repo=? AND id!=?', (t['repo'], t['id'])):
+            if '"research"' in (row['data'] or ''):        # offered once per repository, not for every task
+                return False
+        t['data']['research'] = {'state': 'offered'}
+        self.db.update_task(t['id'], status='WAIT_OWNER', data=t['data'])
+        self.db.event('research_offered', t['id'])
+        self.n.send(f'New project: research first? {t["id"]}',
+                    f'{t["prompt"][:300]}\n\nThis looks like a new project. Run a research phase first (prior art, '
+                    f'papers, methods from the web, with checked sources)? The brief comes to you and to the builder.',
+                    choices=[('Research first', f'research {t["id"]}'), ('Skip', f'noresearch {t["id"]}')],
+                    priority=3, tags='books')
+        return True
+
+    def start_research(self, tid: str) -> None:
+        t = self.db.task(tid)
+        if not t or (t['data'].get('research') or {}).get('state') != 'offered':
+            raise ValueError('task has no pending research offer')
+        t['data']['research']['state'] = 'running'
+        self.db.update_task(tid, status='RESEARCH', data=t['data'])
+
+    def skip_research(self, tid: str) -> None:
+        t = self.db.task(tid)
+        if not t or (t['data'].get('research') or {}).get('state') != 'offered':
+            raise ValueError('task has no pending research offer')
+        t['data']['research']['state'] = 'skipped'
+        self.db.update_task(tid, status='NEW', data=t['data'])
+
+    def _research(self, t: dict) -> None:
+        rc = self.cfg['research_phase']
+        repo = Path(t['repo'])
+        res = self.workers.execute(LANES[rc['lane']], render('research.md', repo=repo, prompt=t['prompt']), repo,
+                                   write=False, schema=RESEARCH_SCHEMA, log_name=f'{t["id"]}-research', web=True)
+        if not res.ok or not res.structured or not str(res.structured.get('brief', '')).strip():
+            raise RuntimeError(f'research failed: {res.error[:300]}')       # daemon retries, then BLOCKED
+        r = res.structured
+        brief_file = self.cfg.state_dir / 'research' / f'{t["id"]}.md'
+        brief_file.parent.mkdir(parents=True, exist_ok=True)
+        brief_file.write_text(r['brief'] + '\n\n## Sources\n' + '\n'.join(f'- [{x["title"]}]({x["url"]}): {x["supports"]}'
+                                                                       for x in r['sources']) + '\n')
+        t['data']['research'] = {'state': 'done', 'brief': r['brief'][:12000], 'sources': r['sources'][:40],
+                                 'open_questions': r['open_questions'][:15], 'file': str(brief_file)}
+        self.db.event('research_done', t['id'], sources=len(r['sources']))
+        self.n.send(f'Research brief: {t["id"]}', f'{r["brief"][:3000]}\n\nFull brief with {len(r["sources"])} sources: '
+                    f'{brief_file}', tags='books')
+        self.db.update_task(t['id'], status='NEW', data=t['data'])
+
+    def _research_note(self, t: dict) -> str:
+        r = t['data'].get('research') or {}
+        if r.get('state') != 'done':
+            return ''
+        return ('\nA research brief was prepared before the work (context only; the request above stays '
+                'authoritative):\n<<<\n' + r['brief'][:6000] + '\n>>>\n')
+
     def _triage(self, t: dict) -> None:
+        if self._offer_research(t):
+            return
         repo = Path(t['repo'])
         data = t['data']
         prompt = render('triage.md', repo=repo, prompt=t['prompt'], owner_answers=self._answers_text(t),
@@ -343,7 +421,7 @@ class TaskFlow(QualityMixin):
         wt = self._worktree(t)
         tri = t['data'].get('triage') or {}
         prev = t['data'].get('last_failure')
-        previous = self._oracle_worker_note(t) + ((f'\nA previous attempt left the worktree as it is now. '
+        previous = self._oracle_worker_note(t) + self._research_note(t) + ((f'\nA previous attempt left the worktree as it is now. '
                     f'Feedback on it (address it; keep what works):\n{prev}\n') if prev else '')
         owner_answers = self._answers_text(t)
         prompt = render('worker.md', worktree=wt, branch=t['branch'] or f'aa/{t["id"]}',

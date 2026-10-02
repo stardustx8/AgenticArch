@@ -258,3 +258,20 @@ and 1.0. Astra was the fastest. Sol matched Astra's outcomes with 65% more token
 - The decider keeps choosing between Astra and Opus for medium-tough tasks.
 - No Sol lane is added.
 - Owner decision, 2026-10-01.
+
+## D032: research phase offered for new projects, added 2026-10-02
+
+Owner decision (2026-10-02): for a new project, aa first offers a research phase. "New" means a repository with at most
+`new_repo_max_commits` (3) commits and at most `new_repo_max_files` (40) files, i.e. young and small, not a small
+long-lived repository. The offer is one ntfy question with the
+buttons "Research first" (`research <id>`) and "Skip" (`noresearch <id>`), and it comes at most once per repository.
+
+On "Research first", a read-only Claude call (`research_phase.lane`, Opus 5.5 high) may use WebSearch and WebFetch and
+writes a brief from `prompts/research.md`: prior art, papers and methods, designs and pitfalls, open questions, and the
+sources it actually opened. The brief:
+- goes to the owner by ntfy;
+- is saved under `state/research/<id>.md`;
+- reaches the builder as context, while the request stays authoritative.
+
+Live check: a toy rate-limiter project got a brief with 21 sources in 170 s, for about $1.20 API-equivalent. Switch:
+`research_phase.offer`.

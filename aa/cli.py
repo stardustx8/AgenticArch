@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         print('queued for the daemon')
         return 0
     if a.cmd == 'status':
-        rows = db.tasks() if a.all else db.tasks(('NEW', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'CONFIDENCE', 'DELIVER',
+        rows = db.tasks() if a.all else db.tasks(('NEW', 'RESEARCH', 'TRIAGED', 'READY', 'VERIFY', 'SPEC', 'CONFIDENCE', 'DELIVER',
                                                   'WAIT_OWNER', 'DEEP', 'BLOCKED'))
         if not rows:
             print('no active tasks' if not a.all else 'no tasks')
