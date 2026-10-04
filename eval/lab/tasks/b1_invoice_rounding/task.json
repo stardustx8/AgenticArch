@@ -1,0 +1,5 @@
+{
+ "id": "b1_invoice_rounding",
+ "tier_hint": "bounded",
+ "prompt": "Invoice totals are occasionally a cent off (a 1.005 unit price comes out as 1.00, and summing lots of 0.10 lines drifts). Please move invoicing/totals.py over to Decimal: round net and tax per line to cents with ROUND_HALF_UP, and have line_net/line_tax/invoice_totals return Decimals. Callers still pass unit_price and tax_rate as floats, ints or strings, and format_money has to keep working."
+}

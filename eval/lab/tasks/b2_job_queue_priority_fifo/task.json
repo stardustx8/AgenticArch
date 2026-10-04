@@ -1,0 +1,5 @@
+{
+ "id": "b2_job_queue_priority_fifo",
+ "tier_hint": "bounded",
+ "prompt": "The job queue blows up with a TypeError as soon as two jobs share a priority, and even if that were fixed there's nothing guaranteeing order among equal priorities. Make equal-priority jobs come out in submission order, and add `JobQueue.cancel(job_id)` returning True if a pending job was cancelled and False otherwise. Cancelled jobs must never come out of `pop()`/`peek()`/`drain()` and shouldn't count towards `len()` or show up in `pending_ids()`; once cancelled, the id can be submitted again."
+}

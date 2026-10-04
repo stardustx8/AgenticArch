@@ -1,0 +1,6 @@
+{
+ "id": "b4_order_pipeline_rounding",
+ "tier_hint": "medium_tough",
+ "prompt": "Customer complaint: an order with 3 pens at 0.835 came out at 2.50 instead of 2.51 \u2014 we round money half-up to the cent everywhere, please fix. Also add an AmountOff coupon (fixed amount, next to PercentOff in shop/discounts.py) that gets spread over the order lines in proportion to their line totals: each line gets its share rounded down to the cent and the leftover cents all go to the largest line (first one on ties), so tax is computed on each discounted line. A coupon can never take the order below zero, and orders with an AmountOff coupon have to save/load through OrderRepository just like percent ones.",
+ "trap": "defect_twins"
+}

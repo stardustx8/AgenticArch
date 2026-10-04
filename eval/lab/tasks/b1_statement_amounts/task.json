@@ -1,0 +1,5 @@
+{
+ "id": "b1_statement_amounts",
+ "tier_hint": "medium_tough",
+ "prompt": "We're onboarding bank statements from the German branch. parse_amount needs to cope with both `1,234.56` and `1.234,56` styles, accounting negatives like `(1,234.56)`, a leading minus, and currency symbols/codes (\u20ac, $, \u00a3, EUR, USD\u2026) before or after the number; a single separator followed by exactly three digits (`1,234`, `1.234`) is a thousands separator. Rows with an empty amount (pending transactions) should be skipped when loading. And monthly_summary must stop adding EUR to USD: key it by (month, currency) and have format_summary print lines like `2024-01 EUR: -1247.06`, sorted by month then currency."
+}

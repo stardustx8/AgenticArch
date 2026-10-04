@@ -1,0 +1,393 @@
+"""Subscription-only worker execution through the native CLIs.
+
+Luna/Astra run as `codex exec` (ChatGPT login); Opus runs as `claude -p`
+(Claude Max login). API-key variables are removed from the child environment
+and the auth mode is verified before every dispatch, so a job can never fall
+back to API billing. Claude's reported `modelUsage` must contain the requested
+model or the job is treated as failed (no silent model substitution).
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
+
+from .config import Config
+
+
+@dataclass(frozen=True)
+class Lane:
+    name: str
+    cli: str      # codex|claude
+    model: str
+    effort: str
+    tier: int
+
+
+LANES: dict[str, Lane] = {l.name: l for l in (
+    Lane('luna_low', 'codex', 'gpt-6-luna', 'low', 0),
+    Lane('luna_high', 'codex', 'gpt-6-luna', 'high', 1),
+    Lane('astra_high', 'codex', 'gpt-6-astra', 'high', 2),
+    Lane('opus_medium', 'claude', 'claude-opus-5-5', 'medium', 2),
+    Lane('opus_high', 'claude', 'claude-opus-5-5', 'high', 2),
+    Lane('fable_high', 'claude', 'claude-fable-5-1', 'high', 1),      # rework after a low confidence check (round F)
+    # Local model (loopback vLLM, no subscription): neutral judge and extra test writer only.
+    Lane('gemma_local', 'local', 'gemma-4-31b', 'n/a', 2),
+    # The same local model as a Codex worker (local_first, round B): Codex with a loopback provider.
+    Lane('gemma_codex', 'codex', 'gemma-4-31b', 'high', 1),
+)}
+LOCAL_CODEX = {'gemma_codex'}      # Codex lanes that talk to the loopback model, never to OpenAI
+
+
+def loopback_url(url: str) -> str:
+    """The local worker's endpoint must stay on this machine (it gets no subscription check)."""
+    from urllib.parse import urlparse
+    u = urlparse(str(url))
+    if u.scheme not in ('http', 'https') or u.hostname not in ('127.0.0.1', 'localhost', '::1'):
+        raise ValueError(f'local_worker.base_url must be a loopback http(s) URL, got {url!r}')
+    return str(url)
+
+# Removed from every child process: any of these could switch a CLI to API billing
+# or to another provider/endpoint.
+SCRUB = ('OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY',
+         'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_USE_BEDROCK',
+         'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK')
+
+
+CLAUDE_REFRESH_RACE = re.compile(r'Failed to refresh OAuth token|another Claude Code process is refreshing', re.I)
+CLAUDE_REFRESH_TRIES = 4
+
+AUTH_FAILURE = re.compile(r'401 Unauthorized|Incorrect API key|invalid[_ ]api[_ ]key|'
+                          r'authentication_error|not logged in|please (?:re-?)?log ?in', re.I)
+
+
+class BillingError(RuntimeError):
+    """The subscription path could not be verified; never dispatch."""
+
+
+@dataclass
+class Result:
+    ok: bool
+    text: str                      # final agent message
+    structured: dict | None = None
+    model_seen: list[str] = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    seconds: float = 0.0
+    error: str = ''
+
+
+def child_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items()
+           if k not in SCRUB and not k.startswith(('CLAUDE_CODE_', 'CLAUDECODE', 'CODEX_SANDBOX'))}
+    env['PATH'] = f"{Path('~/.local/bin').expanduser()}:{env.get('PATH', '/usr/bin:/bin')}"
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    return env
+
+
+Runner = Callable[..., subprocess.CompletedProcess]
+
+
+class Workers:
+    def __init__(self, cfg: Config, runner: Runner = subprocess.run):
+        # Claude worker guard: 'auto' = Claude's auto-mode safety classifier reviews every action
+        # (default; the OS sandbox cannot nest under Ubuntu's AppArmor userns restriction here),
+        # 'sandbox' = auto mode + OS sandbox (needs nested user namespaces), 'acceptEdits' = legacy.
+        # Codex workers already run in Codex's workspace-write sandbox.
+        self.claude_guard = cfg['workers'].get('claude_guard', 'auto')
+        if cfg['workers'].get('claude_sandbox'):
+            self.claude_guard = 'sandbox'
+        if self.claude_guard not in ('auto', 'sandbox', 'acceptEdits'):
+            raise ValueError(f'unknown workers.claude_guard {self.claude_guard!r}')
+        self.codex = str(cfg.path('workers', 'codex'))
+        self.claude = str(cfg.path('workers', 'claude'))
+        self.local = cfg['local_llm']
+        self.timeout = int(cfg['workers']['timeout_s'])
+        self.codex_no_memories = bool(cfg['workers'].get('codex_no_memories', True))
+        self.codex_sandbox = cfg['workers'].get('codex_sandbox', 'profile')
+        if self.codex_sandbox not in ('profile', 'legacy'):
+            raise ValueError(f'unknown workers.codex_sandbox {self.codex_sandbox!r}')
+        self.codex_deny_read = [str(Path(p).expanduser()) for p in cfg['workers'].get('codex_deny_read', [])]
+        self.refresh_wait_s = float(cfg['workers'].get('claude_refresh_wait_s', 20))
+        self.local_worker = cfg.data.get('local_worker') or {}
+        self.logs = cfg.logs
+        self.run = runner
+        self._auth_ok: dict[str, float] = {}
+
+    # -- billing preflight ---------------------------------------------------
+    def verify_billing(self, cli: str) -> None:
+        if time.time() - self._auth_ok.get(cli, 0) < 600:
+            return
+        if cli == 'codex':
+            auth = Path(os.environ.get('CODEX_HOME', '~/.codex')).expanduser() / 'auth.json'
+            try:
+                data = json.loads(auth.read_text())
+            except (OSError, ValueError) as exc:
+                raise BillingError(f'cannot read Codex auth: {exc}') from exc
+            if data.get('auth_mode') != 'chatgpt' or data.get('OPENAI_API_KEY'):
+                raise BillingError('Codex is not on ChatGPT subscription login')
+        elif cli == 'local':
+            if not self.local_available():
+                raise BillingError('local model server is not available')
+            return
+        elif cli == 'claude':
+            p = self.run([self.claude, 'auth', 'status'], capture_output=True, text=True,
+                         env=child_env(), timeout=60, stdin=subprocess.DEVNULL)
+            try:
+                st = json.loads(p.stdout)
+            except ValueError as exc:
+                raise BillingError('cannot read Claude auth status') from exc
+            if not (st.get('loggedIn') and st.get('authMethod') == 'claude.ai'
+                    and st.get('subscriptionType') in {'max', 'pro', 'team', 'enterprise'}):
+                raise BillingError(f'Claude is not on a subscription login: {st.get("authMethod")}')
+        else:
+            raise BillingError(f'unknown CLI {cli}')
+        self._auth_ok[cli] = time.time()
+
+    # -- execution -------------------------------------------------------------
+    def execute(self, lane: Lane, prompt: str, cwd: Path, *, write: bool = True,
+                extra_dirs: tuple[Path, ...] = (), schema: dict | None = None,
+                log_name: str = 'job', web: bool = False) -> Result:
+        if lane.name not in LOCAL_CODEX:           # the loopback model needs no subscription login
+            self.verify_billing(lane.cli)
+        self.logs.mkdir(parents=True, exist_ok=True)
+        log = self.logs / f'{time.strftime("%Y%m%d-%H%M%S")}-{log_name}-{lane.name}.log'
+        t0 = time.time()
+        if lane.cli == 'codex':
+            res = self._codex(lane, prompt, cwd, write, extra_dirs, schema, log)
+        elif lane.cli == 'local':
+            res = self._local(lane, prompt, schema, log)
+        else:
+            res = self._claude(lane, prompt, cwd, write, extra_dirs, schema, log, web=web)
+        res.seconds = time.time() - t0
+        return res
+
+    def _codex_sandbox_args(self, write: bool, extra_dirs) -> list[str]:
+        """D034: a named permission profile (the legacy -s flag would override it). Same reach as -s, plus denied
+        credential stores; extra job directories are writable in write mode, readable otherwise."""
+        if self.codex_sandbox == 'legacy':
+            return ['-s', 'workspace-write' if write else 'read-only']
+        name = 'aa_write' if write else 'aa_read'
+        fs = {p: 'deny' for p in self.codex_deny_read}
+        for d in extra_dirs:
+            fs[str(d)] = 'write' if write else 'read'
+        table = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}' for k, v in fs.items()) + '}'
+        return ['-c', f'permissions.{name}.extends={json.dumps(":workspace" if write else ":read-only")}',
+                '-c', f'permissions.{name}.filesystem={table}',
+                '-c', f'permissions.{name}.network={{enabled=false}}',
+                '-c', f'default_permissions={json.dumps(name)}']
+
+    def _codex(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
+        out_file = log.with_suffix('.last.txt')
+        cmd = [self.codex, 'exec', '-m', lane.model, '-c', f'model_reasoning_effort="{lane.effort}"',
+               '-c', 'approval_policy="never"', '--ephemeral', '--json', '--skip-git-repo-check',
+               *self._codex_sandbox_args(write, extra_dirs), '-C', str(cwd),
+               '-o', str(out_file)]
+        if self.codex_sandbox == 'legacy':
+            for d in extra_dirs:
+                cmd += ['--add-dir', str(d)]
+        schema_file = None
+        local = lane.name in LOCAL_CODEX
+        if schema is not None and local:
+            # vLLM enforces an output schema on every turn, which rules out tool calls: the model answers at
+            # once without working (round-b-r1). Ask for the JSON in the prompt and parse the last object.
+            prompt += ('\n\nWhen you have finished the work, end your final message with one JSON object that '
+                       f'matches this JSON schema (no text after it):\n{json.dumps(schema)}\n')
+        elif schema is not None:
+            schema_file = log.with_suffix('.schema.json')
+            schema_file.write_text(json.dumps(schema))
+            cmd += ['--output-schema', str(schema_file)]
+        if lane.name in LOCAL_CODEX:
+            lw = self.local_worker
+            url = loopback_url(lw.get('base_url', 'http://127.0.0.1:8100/v1'))
+            # json.dumps quotes the value (no TOML injection); the provider never gets the ChatGPT login.
+            cmd += ['-c', 'model_provider="aa_local"',
+                    '-c', f'model_providers.aa_local={{name="aa-local", base_url={json.dumps(url)}, '
+                          'wire_api="responses", requires_openai_auth=false}',
+                    '-c', f'model_context_window={int(lw.get("context_window", 131072))}',
+                    '-c', 'apply_patch_tool_type="function"']
+        if self.codex_no_memories:
+            # Suppresses automatic memory use and generation for this call only (not filesystem reads).
+            cmd += ['-c', 'features.memories=false', '-c', 'memories.use_memories=false',
+                    '-c', 'memories.generate_memories=false']
+        cmd.append('-')
+        try:
+            p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),
+                         timeout=self.timeout, cwd=str(cwd))
+        except subprocess.TimeoutExpired:
+            return Result(False, '', error='timeout')
+        log.write_text(f'$ {" ".join(cmd[:-1])}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}')
+        usage: dict = {}
+        for line in p.stdout.splitlines():
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get('type') == 'turn.completed':
+                for k, v in (ev.get('usage') or {}).items():
+                    usage[k] = usage.get(k, 0) + (v or 0)
+        text = out_file.read_text() if out_file.exists() else ''
+        if p.returncode != 0 and AUTH_FAILURE.search(p.stdout[-20000:] + p.stderr[-5000:]):
+            # A rejected login is an owner problem, not a code problem: never retry/escalate on it.
+            self._auth_ok.pop('codex', None)
+            raise BillingError('Codex login rejected by the server (401). Re-login with `codex login` '
+                               '(ChatGPT account), then `aa answer "retry <task>"`.')
+        structured = (_last_json_object(text) if local else _json_or_none(text)) if schema is not None else None
+        ok = p.returncode == 0 and bool(text.strip()) and (schema is None or structured is not None)
+        return Result(ok, text, structured, [lane.model] if ok else [], usage,
+                      error='' if ok else (p.stderr[-2000:] or f'exit {p.returncode}'))
+
+    def local_available(self) -> bool:
+        if not self.local.get('enabled', True):
+            return False
+        import urllib.request
+        try:
+            with urllib.request.urlopen(self.local['url'].rstrip('/') + '/v1/models', timeout=3) as r:
+                return any(m.get('id') == self.local['model'] for m in json.load(r).get('data', []))
+        except (OSError, ValueError):
+            return False
+
+    def _local(self, lane, prompt, schema, log) -> Result:
+        """Loopback OpenAI-compatible chat call with schema-constrained output (no tools)."""
+        import urllib.request
+        body = {'model': self.local['model'], 'messages': [{'role': 'user', 'content': prompt}],
+                'max_tokens': int(self.local.get('max_tokens', 4096)),
+                # Known Gemma 4 / grammar looping (vllm#40080): stop early instead of running to max_tokens.
+                'repetition_detection': {'max_pattern_size': 20, 'min_pattern_size': 1, 'min_count': 6},
+                **self.local.get('sampling', {'temperature': 0.2})}
+        if self.local.get('chat_template_kwargs'):
+            body['chat_template_kwargs'] = self.local['chat_template_kwargs']
+        if schema is not None:
+            body['response_format'] = {'type': 'json_schema',
+                                       'json_schema': {'name': 'result', 'schema': schema, 'strict': True}}
+        req = urllib.request.Request(self.local['url'].rstrip('/') + '/v1/chat/completions',
+                                     data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=float(self.local.get('timeout_s', 600))) as r:
+                data = json.load(r)
+        except (OSError, ValueError) as exc:
+            return Result(False, '', error=f'local model error: {exc}')
+        choice = (data.get('choices') or [{}])[0]
+        text = (choice.get('message', {}).get('content') or '').strip()
+        if choice.get('finish_reason') == 'length' or choice.get('stop_reason') == 'repetition_detected':
+            return Result(False, text, error='local model output degenerated (repetition / token limit)')
+        log.write_text(f'local {self.local["model"]}\n--- prompt\n{prompt[-4000:]}\n--- answer\n{text}')
+        structured = _json_or_none(text) if schema is not None else None
+        ok = bool(text.strip()) and (schema is None or structured is not None)
+        return Result(ok, text, structured, [self.local['model']] if ok else [], data.get('usage') or {},
+                      error='' if ok else 'local model returned no valid output')
+
+    def _claude(self, lane, prompt, cwd, write, extra_dirs, schema, log, web: bool = False) -> Result:
+        # --strict-mcp-config without --mcp-config: no MCP servers or claude.ai connectors in workers.
+        cmd = [self.claude, '-p', '--model', lane.model, '--effort', lane.effort,
+               '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config']
+        if write and self.claude_guard == 'sandbox':
+            cmd += ['--permission-mode', 'auto', '--settings', json.dumps(sandbox_settings(cwd, extra_dirs)),
+                    '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
+        elif write and self.claude_guard == 'auto':
+            cmd += ['--permission-mode', 'auto', '--settings', json.dumps({'permissions': {'deny': WORKER_DENY}}),
+                    '--allowedTools', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
+        elif write:
+            cmd += ['--permission-mode', 'acceptEdits',
+                    '--allowedTools', 'Bash', 'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite']
+        else:
+            cmd += ['--permission-mode', 'default', '--allowedTools', 'Read', 'Glob', 'Grep',
+                    *(['WebSearch', 'WebFetch'] if web else []),        # research phase: read the web, write nothing
+                    '--disallowedTools', 'Edit', 'Write', 'Bash']
+        for d in extra_dirs:
+            cmd += ['--add-dir', str(d)]
+        if schema is not None:
+            cmd += ['--json-schema', json.dumps(schema)]
+        for attempt in range(1, CLAUDE_REFRESH_TRIES + 1):
+            try:
+                p = self.run(cmd, input=prompt, capture_output=True, text=True, env=child_env(),
+                             timeout=self.timeout, cwd=str(cwd))
+            except subprocess.TimeoutExpired:
+                return Result(False, '', error='timeout')
+            # Parallel Claude Code processes share one login; when the access token expires they race to
+            # refresh it and the losers fail at once (round-c-r1). That is transient: wait and rerun.
+            if attempt < CLAUDE_REFRESH_TRIES and CLAUDE_REFRESH_RACE.search(p.stdout[-5000:] + p.stderr[-5000:]):
+                time.sleep(self.refresh_wait_s * attempt)
+                continue
+            break
+        log.write_text(f'$ {" ".join(cmd)}\n--- stdout\n{p.stdout}\n--- stderr\n{p.stderr}')
+        data = _json_or_none(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else '')
+        if not data:
+            err = (p.stderr + p.stdout)[-2000:] or 'no JSON result'
+            if 'sandbox required but unavailable' in err:
+                raise BillingError('Claude sandbox unavailable (install bubblewrap and socat): ' + err[:300])
+            return Result(False, '', error=err)
+        if data.get('is_error') and AUTH_FAILURE.search(json.dumps(data)[:20000]):
+            self._auth_ok.pop('claude', None)
+            raise BillingError('Claude login rejected by the server. Re-login with `claude auth login`, '
+                               'then `aa answer "retry <task>"`.')
+        seen = list((data.get('modelUsage') or {}).keys())
+        text = data.get('result') or ''
+        structured = data.get('structured_output')
+        if schema is not None and structured is None:
+            structured = _json_or_none(text)
+        err = ''
+        if data.get('is_error'):
+            err = text or data.get('api_error_code') or 'claude error'
+        elif not any(m.startswith(lane.model) for m in seen):
+            err = f'model substitution: requested {lane.model}, observed {seen}'
+        elif schema is not None and structured is None:
+            err = 'missing structured output'
+        usage = {'api_equivalent_usd': data.get('total_cost_usd'), **(data.get('usage') or {})}
+        return Result(not err, text, structured, seen, usage, error=err)
+
+
+# Hard denies for Claude workers, independent of the auto-mode classifier (which honours
+# explicitly requested actions): workers never publish, change remotes or escalate privileges.
+WORKER_DENY = ['Bash(git push:*)', 'Bash(git remote:*)', 'Bash(git config:*)', 'Bash(sudo:*)',
+               'Bash(ssh:*)', 'Bash(scp:*)', 'Bash(gh:*)', 'Read(~/.ssh/**)', 'Read(~/.codex/auth.json)',
+               'Read(~/.claude/.credentials.json)', 'Read(~/.config/agenticarch/**)']
+
+
+def sandbox_settings(cwd: Path, extra_dirs: tuple[Path, ...] = ()) -> dict:
+    """Claude Code sandbox: writes only in the job directories, credentials unreadable,
+    refuse to start without a working sandbox (never silently unsandboxed)."""
+    return {'permissions': {'deny': WORKER_DENY}, 'sandbox': {
+        'enabled': True, 'allowUnsandboxedCommands': False, 'failIfUnavailable': True,
+        'filesystem': {'allowWrite': [str(cwd), *map(str, extra_dirs)],
+                       'denyRead': ['~/.ssh', '~/.codex/auth.json', '~/.claude/.credentials.json',
+                                    '~/.config/agenticarch', '~/.local/share/agenticarch/aa.sqlite']},
+    }}
+
+
+def _last_json_object(text: str) -> dict | None:
+    """The last JSON object in free text (a local model's final message may start with prose or code)."""
+    dec = json.JSONDecoder()
+    text = text or ''
+    pos = text.rfind('{')
+    while pos >= 0:
+        try:
+            v, _ = dec.raw_decode(text, pos)
+            if isinstance(v, dict) and 'status' in v:
+                return v
+        except ValueError:
+            pass
+        pos = text.rfind('{', 0, pos)
+    return _json_or_none(text)
+
+
+def _json_or_none(text: str) -> dict | None:
+    text = (text or '').strip()
+    if text.startswith('```'):
+        text = text.strip('`')
+        text = text[text.find('{'):]
+    try:
+        v = json.loads(text)
+    except ValueError:
+        start, end = text.find('{'), text.rfind('}')
+        if start < 0 or end <= start:
+            return None
+        try:
+            v = json.loads(text[start:end + 1])
+        except ValueError:
+            return None
+    return v if isinstance(v, dict) else None

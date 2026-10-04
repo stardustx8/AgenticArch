@@ -1,0 +1,5 @@
+{
+ "id": "b3_calc_power_unary",
+ "tier_hint": "medium_tough",
+ "prompt": "Please add unary minus/plus (`-3`, `2 * -4`, `--1`) and a `^` power operator to the calculator, following normal math conventions. `^` is right-associative and binds tighter than unary minus, so `-2^2` is -4, `2^-1` is 1/2 and `2^3^2` is 512. Results must stay exact Fractions. A non-integer exponent should raise ValueError, and `0^-1` should raise ZeroDivisionError like division does. to_string also needs to keep printing with minimal parentheses for the new syntax."
+}

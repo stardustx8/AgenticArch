@@ -1,0 +1,5 @@
+{
+ "id": "b1_json_flatten_lists",
+ "tier_hint": "bounded",
+ "prompt": "flatten() only walks dicts, so lists come through as raw values and empty dicts silently disappear from the output. Make it descend into lists using the index as the key segment (`{\"a\": [{\"b\": 1}]}` -> `{\"a.0.b\": 1}`) and keep empty dicts/lists as leaf values instead of dropping them. unflatten() should be the inverse, rebuilding a list wherever the keys at a level are exactly 0..n-1."
+}

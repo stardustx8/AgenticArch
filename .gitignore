@@ -22,3 +22,7 @@ private/
 *.zip
 *.bundle
 *.log
+__pycache__/
+*.pyc
+eval/probes/secret_leak.jsonl
+eval/lab/results/runs/

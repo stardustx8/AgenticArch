@@ -1,0 +1,5 @@
+{
+ "id": "b2_config_hot_reload",
+ "tier_hint": "medium_tough",
+ "prompt": "Add hot reload to `ConfigStore`. `reload()` should re-read the source, validate it and swap it in atomically, returning the sorted list of dotted leaf keys that were added, removed or changed (calling it before `load()` just diffs against an empty config). Add `subscribe(prefix, callback)`, which returns an unsubscribe function that's safe to call twice. After a successful reload, each subscriber gets `callback(key, old, new)` once for every changed leaf under its prefix, in sorted key order and with the new config already live; prefixes match whole dotted segments (`db` covers `db.port` but not `dbx.host`), `\"\"` means everything, and `old`/`new` are None for added/removed keys. Lists are leaves, a leaf that becomes an object (or vice versa) counts as a removal plus additions, and if the new source can't be parsed or fails validation, keep the old config, notify nobody and raise `ConfigError`."
+}

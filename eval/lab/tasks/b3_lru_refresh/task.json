@@ -1,0 +1,5 @@
+{
+ "id": "b3_lru_refresh",
+ "tier_hint": "bounded",
+ "prompt": "Users are getting logged out right after activity. Once the SessionStore is full, touching an existing session expires some other user, and sometimes the session being touched shows up in `expired`. Putting a key that's already cached should just update its value and make it the most recent entry. Nothing should be evicted."
+}

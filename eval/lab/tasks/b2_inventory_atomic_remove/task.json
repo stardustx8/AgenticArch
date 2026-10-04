@@ -1,0 +1,5 @@
+{
+ "id": "b2_inventory_atomic_remove",
+ "tier_hint": "bounded",
+ "prompt": "`Inventory.remove_stock` happily drives quantities negative \u2014 it should raise `InsufficientStock` (with `sku`, `requested` and `available` attributes) and leave stock and the audit log untouched. Also add `remove_many({sku: qty, ...})` for order fulfilment that's all-or-nothing: if any line can't be satisfied, nothing is removed and nothing is logged (on success each line gets logged like a normal removal). Same positive-int validation as `add_stock` applies to every quantity."
+}
