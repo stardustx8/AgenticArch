@@ -157,6 +157,17 @@ deep-case reading list by BM25 (D022). GPU ECC is enabled (no capacity loss).
 - **Lab: SemIf file hints (private repo `results/semif-hints-r1`).** Training with a "none of these files" option,
   shaped like the hint tournament. Running; not deployed.
 
+## 2026-10-04
+
+- D034 (this PR): Codex workers use a named permission profile with credential stores denied; the legacy -s flag is
+  gone (`workers.codex_sandbox = "legacy"` restores it).
+- Lab results (private repo):
+  - hint3-r1: injected file hints do not measurably help Astra builders, and learned hints add nothing over text
+    search. The owner accepted "no injected hints" and closed the hint track.
+  - Clef-Flash is a candidate decider for factual checks only (Pro 06A).
+- Claude's Bash sandbox cannot start on this Ubuntu host (AppArmor unpriv_bwrap vs Claude's seccomp helper). It fails
+  closed. Lab builders are therefore Codex.
+
 ## Next steps
 
 1. Continue HO-01 as above; then decide defaults (possibly minimal pipeline + proven gates).

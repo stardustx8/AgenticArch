@@ -108,6 +108,10 @@ class Workers:
         self.local = cfg['local_llm']
         self.timeout = int(cfg['workers']['timeout_s'])
         self.codex_no_memories = bool(cfg['workers'].get('codex_no_memories', True))
+        self.codex_sandbox = cfg['workers'].get('codex_sandbox', 'profile')
+        if self.codex_sandbox not in ('profile', 'legacy'):
+            raise ValueError(f'unknown workers.codex_sandbox {self.codex_sandbox!r}')
+        self.codex_deny_read = [str(Path(p).expanduser()) for p in cfg['workers'].get('codex_deny_read', [])]
         self.refresh_wait_s = float(cfg['workers'].get('claude_refresh_wait_s', 20))
         self.local_worker = cfg.data.get('local_worker') or {}
         self.logs = cfg.logs
@@ -162,14 +166,30 @@ class Workers:
         res.seconds = time.time() - t0
         return res
 
+    def _codex_sandbox_args(self, write: bool, extra_dirs) -> list[str]:
+        """D034: a named permission profile (the legacy -s flag would override it). Same reach as -s, plus denied
+        credential stores; extra job directories are writable in write mode, readable otherwise."""
+        if self.codex_sandbox == 'legacy':
+            return ['-s', 'workspace-write' if write else 'read-only']
+        name = 'aa_write' if write else 'aa_read'
+        fs = {p: 'deny' for p in self.codex_deny_read}
+        for d in extra_dirs:
+            fs[str(d)] = 'write' if write else 'read'
+        table = '{' + ', '.join(f'{json.dumps(k)}={json.dumps(v)}' for k, v in fs.items()) + '}'
+        return ['-c', f'permissions.{name}.extends={json.dumps(":workspace" if write else ":read-only")}',
+                '-c', f'permissions.{name}.filesystem={table}',
+                '-c', f'permissions.{name}.network={{enabled=false}}',
+                '-c', f'default_permissions={json.dumps(name)}']
+
     def _codex(self, lane, prompt, cwd, write, extra_dirs, schema, log) -> Result:
         out_file = log.with_suffix('.last.txt')
         cmd = [self.codex, 'exec', '-m', lane.model, '-c', f'model_reasoning_effort="{lane.effort}"',
                '-c', 'approval_policy="never"', '--ephemeral', '--json', '--skip-git-repo-check',
-               '-s', 'workspace-write' if write else 'read-only', '-C', str(cwd),
+               *self._codex_sandbox_args(write, extra_dirs), '-C', str(cwd),
                '-o', str(out_file)]
-        for d in extra_dirs:
-            cmd += ['--add-dir', str(d)]
+        if self.codex_sandbox == 'legacy':
+            for d in extra_dirs:
+                cmd += ['--add-dir', str(d)]
         schema_file = None
         local = lane.name in LOCAL_CODEX
         if schema is not None and local:

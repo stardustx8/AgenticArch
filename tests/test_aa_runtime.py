@@ -1109,8 +1109,46 @@ class WorkerTests(unittest.TestCase):
         cmd = runner.call_args[0][0]
         self.assertIn('gpt-6-luna', cmd)
         self.assertIn('model_reasoning_effort="low"', cmd)
-        self.assertIn('read-only', cmd)
+        self.assertIn('default_permissions="aa_read"', cmd)    # D034: named profile, read-only
+        self.assertIn('permissions.aa_read.extends=":read-only"', cmd)
         self.assertIn('memories.use_memories=false', cmd)   # D024: personal memories stay out
+
+    def test_codex_profile_replaces_legacy_sandbox_flag(self):
+        # D034: -s would override a named profile, so it is not passed; credentials are denied; extra dirs writable.
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Workers(self.cfg(tmp), runner=runner)
+            w.verify_billing = lambda cli: None
+            w.execute(LANES['luna_high'], 'p', Path(tmp), write=True, extra_dirs=(Path(tmp) / 'cases',))
+        cmd = runner.call_args[0][0]
+        self.assertNotIn('-s', cmd)
+        self.assertNotIn('--add-dir', cmd)
+        self.assertIn('default_permissions="aa_write"', cmd)
+        self.assertIn('permissions.aa_write.extends=":workspace"', cmd)
+        self.assertIn('permissions.aa_write.network={enabled=false}', cmd)
+        fs = next(c for c in cmd if c.startswith('permissions.aa_write.filesystem='))
+        self.assertIn(json.dumps(str(Path('~/.ssh').expanduser())) + '="deny"', fs)
+        self.assertIn(json.dumps(str(Path('~/.config/gh').expanduser())) + '="deny"', fs)
+        self.assertIn(json.dumps(str(Path(tmp) / 'cases')) + '="write"', fs)
+        self.assertNotIn(json.dumps(str(Path('~/.local/share/agenticarch').expanduser())) + '="deny"', fs)  # worktrees live there
+
+    def test_codex_legacy_sandbox_mode_still_available(self):
+        runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp); cfg.data['workers']['codex_sandbox'] = 'legacy'
+            w = Workers(cfg, runner=runner)
+            w.verify_billing = lambda cli: None
+            w.execute(LANES['luna_high'], 'p', Path(tmp), write=True, extra_dirs=(Path(tmp) / 'x',))
+        cmd = runner.call_args[0][0]
+        self.assertEqual(cmd[cmd.index('-s') + 1], 'workspace-write')
+        self.assertIn('--add-dir', cmd)
+        self.assertFalse(any(c.startswith('default_permissions=') for c in cmd))
+
+    def test_codex_sandbox_mode_is_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self.cfg(tmp); cfg.data['workers']['codex_sandbox'] = 'none'
+            with self.assertRaises(ValueError):
+                Workers(cfg)
 
     def test_codex_memories_flags_can_be_turned_off(self):
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))

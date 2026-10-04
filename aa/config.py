@@ -61,6 +61,14 @@ DEFAULTS: dict[str, Any] = {
         # Keep the owner's personal Codex memories out of harness workers (native per-call flags; the
         # subscription login stays where it is). The lab measured all arms this way (D024).
         'codex_no_memories': True,
+        # D034: Codex workers run under a named permission profile instead of the legacy -s flag. Normal reads stay
+        # (owner repos and toolchains anywhere), writes stay in the worktree, the network stays off, and the credential
+        # stores below are unreadable from the command sandbox. 'legacy' restores -s workspace-write/read-only.
+        'codex_sandbox': 'profile',
+        'codex_deny_read': ['~/.ssh', '~/.gnupg', '~/.codex/auth.json', '~/.claude/.credentials.json',
+                            '~/.config/agenticarch', '~/.config/gh', '~/.config/typesafe', '~/.docker/config.json',
+                            '~/.aws', '~/.netrc', '~/.git-credentials',
+                            '~/.local/share/agenticarch/aa.sqlite', '~/.local/share/agenticarch/logs'],
     },
     'triage': {
         # Codex model that proposes the tier (read-only inspection of the repo).
