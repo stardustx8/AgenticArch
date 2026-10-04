@@ -290,3 +290,25 @@ research rather than aa guessing from the repository's age and size.
 - Later, the reply is refused with a "Reply not applied" ping.
 - The research call itself is unchanged from D032: Opus with web search writes a sourced brief for the owner and the
   builder, and the request stays authoritative.
+
+## D034: Codex workers under a named permission profile, added 2026-10-04
+
+Owner go (2026-10-04), following GPT-6 Pro's turn-06B isolation decision and the lab's qualification work.
+
+- Codex workers no longer get the legacy `-s workspace-write|read-only` flag. That flag would override named
+  permission profiles. They run under `aa_write` (extends `:workspace`) or `aa_read` (extends `:read-only`), selected
+  with `default_permissions`. The network stays off.
+- Their reach is otherwise unchanged: normal reads anywhere (owner repos, toolchains), writes only in the worktree and
+  the job's extra directories (which replace `--add-dir`). In addition, the credential stores in
+  `workers.codex_deny_read` are unreadable from the command sandbox:
+  - ~/.ssh, ~/.gnupg;
+  - the Codex and Claude logins;
+  - ~/.config/agenticarch (ntfy token), ~/.config/gh, ~/.config/typesafe;
+  - Docker, AWS, netrc and git credentials;
+  - aa's database and logs.
+  The worktrees under the state dir stay readable.
+- Verified with deterministic `codex sandbox` probes and one live worker session (reads, writes, and test runs work;
+  the stores are blocked).
+- Escape hatch: `workers.codex_sandbox = "legacy"`.
+- Not covered: Claude workers. Their Bash sandbox cannot start on this Ubuntu host (AppArmor), so they keep
+  claude_guard as configured.
